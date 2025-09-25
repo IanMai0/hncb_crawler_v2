@@ -1,0 +1,38 @@
+    import React, { useRef, useState } from 'react';
+    import ReCAPTCHA from 'react-google-recaptcha';
+
+    function MyForm() {
+      const recaptchaRef = useRef();
+      const [recaptchaToken, setRecaptchaToken] = useState(null);
+
+      const handleFormSubmit = async (event) => {
+        event.preventDefault();
+        const token = recaptchaRef.current.getValue();
+        setRecaptchaToken(token); // 在此將 token 發送到你的後端
+
+        if (token) {
+          // 將 token 發送給你的後端進行驗證
+          console.log('reCAPTCHA token:', token);
+          // ... 調用你的後端 API
+        } else {
+          console.log('請完成 reCAPTCHA 驗證');
+        }
+      };
+
+      return (
+        <form onSubmit={handleFormSubmit}>
+          {/* 你的表單字串 */}
+
+          <ReCAPTCHA
+            ref={recaptchaRef}
+            sitekey="YOUR_SITE_KEY" // 替換成你的網站 Key
+            onChange={(token) => setRecaptchaToken(token)}
+          />
+
+          <button type="submit">提交</button>
+        </form>
+      );
+    }
+
+    export default MyForm;
+    
