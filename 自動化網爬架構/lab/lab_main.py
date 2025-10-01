@@ -27,12 +27,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-# ===== 下載與解壓（沿用你原本流程，調整成可重用函式）=====
+# ===== 下載與解壓（沿用原本流程，調整成可重用函式）=====
 def download_and_extract_zip(url: str, extract_to: str = "./data") -> str:
     """
     下載 zip → 解壓 → 檔名加上時間戳；回傳「單一解壓出的檔名」。
     若 zip 內多檔，會回傳最後一個改名後的檔名。
-    來源邏輯：你的流程控制檔（略有整理）。 :contentReference[oaicite:3]{index=3}
+    來源邏輯：流程控制檔。 :contentReference[oaicite:3]{index=3}
     """
     os.makedirs(extract_to, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
