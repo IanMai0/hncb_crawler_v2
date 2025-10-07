@@ -576,7 +576,7 @@ def main():
     total = len(all_ids)
     logger.info(f"總目標 {total:,}，歷史已完成 {len(hist_done):,}，尚待 {total - len(hist_done):,}")
 
-    for idx, uid in enumerate(all_ids, start=1):
+    for idx, uid in enumerate(all_ids, start=5):
         if uid in hist_done or uid in sess_done:  # 首先檢查該統編是否跑過
             continue
 
@@ -605,4 +605,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
