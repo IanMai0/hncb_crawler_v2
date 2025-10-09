@@ -1,161 +1,135 @@
-# tradeAdmin_optimized.py
+# tradeAdmin_optimized_secure.py
 # -*- coding: utf-8 -*-
+"""
+加強版（安全優化）說明：
+- CWE-778: 全面升級 Logging（TimedRotatingFileHandler、每次請求摘要、耗時、fail_streak、遮罩敏感資訊）
+- CWE-295/SSRF: 僅允許 https://fbfh.trade.gov.tw，嚴格檢查 URL 主機名，不 mount http
+- CWE-400: 限制回應大小（2 MB）、circuit breaker（連續錯誤暫停）、退避抖動
+- CWE-532: 遮蔽 verifySHidden / payload
+- CWE-73: CSV Injection防護（以單引號'前置）、原子寫檔（.tmp -> replace）
+- 其他：訊號安全收尾（flush + logger handlers flush）、輸入/回傳健壯化
+"""
+from __future__ import annotations
+
 import os
+import sys
 import csv
 import time
 import logging
+import random
+import signal
 from datetime import datetime
-from typing import List, Dict, Any, Iterable, Optional, Set
+from typing import List, Dict, Any, Iterable, Optional, Set, Tuple
+from contextlib import contextmanager
+from urllib.parse import urlparse
 
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from requests.exceptions import RequestException, Timeout
-from zoneinfo import ZoneInfo
-
-# ===== Session & HTTP 工具 =====
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import random
-import signal
-from contextlib import contextmanager
+from zoneinfo import ZoneInfo
 
+# =========================
+# 常數與全域設定
+# =========================
 HTTP_CONNECT_TIMEOUT = 10
 HTTP_READ_TIMEOUT = 30
 DEFAULT_TIMEOUT = (HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT)
 
-def build_session() -> requests.Session:
-    s = requests.Session()
-    # 連線池
-    adapter = HTTPAdapter(
-        pool_connections=64,
-        pool_maxsize=64,
-        max_retries=Retry(
-            total=5,
-            connect=5,
-            read=5,
-            status=5,
-            backoff_factor=0.6,              # 0.6, 1.2, 2.4, ...
-            status_forcelist=(429, 500, 502, 503, 504),
-            allowed_methods=frozenset({"GET", "POST"}),
-            raise_on_status=False,
-            respect_retry_after_header=True,
-        ),
-    )
-    s.mount("https://", adapter)
-    s.mount("http://", adapter)
-    s.headers.update({
-        "User-Agent": "Mozilla/5.0",
-        "X-Requested-With": "XMLHttpRequest",
-        "Origin": "https://fbfh.trade.gov.tw",
-        "Referer": "https://fbfh.trade.gov.tw/fb/web/queryBasicf.do",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-    })
-    return s
+# 允許的網域（避免 SSRF / 錯址）
+ALLOWED_HOST = "fbfh.trade.gov.tw"
+ALLOWED_SCHEME = "https"
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB
 
-def _sleep_jitter(base: float = 0.25, span: float = 0.35):
-    time.sleep(base + random.random() * span)
+# Circuit breaker
+CB_FAIL_THRESHOLD = 20
+CB_COOLDOWN_SEC = 60
 
-class HttpClient:
-    """封裝 requests，統一錯誤處理與 retry 行為；必要時重建 Session。"""
-    def __init__(self):
-        self.session = build_session()
-        self.fail_streak = 0
-        self.rebuild_threshold = 8  # 連續失敗達門檻就重建
+# Timezone
+TZ = ZoneInfo("Asia/Taipei")
+def now_ts() -> str:
+    return datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-    def rebuild(self):
-        try:
-            self.session.close()
-        except Exception:
-            pass
-        self.session = build_session()
-        self.fail_streak = 0
-        logger.warning("🔁 Session rebuilt due to consecutive failures")
-
-    def _request(self, method: str, url: str, *, timeout=DEFAULT_TIMEOUT, **kwargs) -> requests.Response:
-        try:
-            resp = self.session.request(method, url, timeout=timeout, **kwargs)
-            self.fail_streak = 0
-            _sleep_jitter()
-            return resp
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            self.fail_streak += 1
-            logger.warning(f"🌐 transient error ({self.fail_streak}): {e}")
-            if self.fail_streak >= self.rebuild_threshold:
-                self.rebuild()
-            raise
-
-    def post_form(self, url: str, data: dict, *, timeout=DEFAULT_TIMEOUT, headers: dict | None = None) -> requests.Response:
-        return self._request("POST", url, data=data, headers=headers, timeout=timeout)
-
-    def post_json(self, url: str, json: dict, *, timeout=DEFAULT_TIMEOUT, headers: dict | None = None) -> requests.Response:
-        h = {}
-        if headers:
-            h.update(headers)
-        h.setdefault("Content-Type", "application/json;charset=UTF-8")
-        return self._request("POST", url, json=json, headers=h, timeout=timeout)
-
-# ===== 安全收尾：中斷訊號 flush =====
-def install_signal_handlers(exporter: "BucketCsvExporter"):
-    def _handler(signum, frame):
-        logger.warning(f"⚠️ received signal {signum}, flushing buffers...")
-        try:
-            exporter.flush()
-        finally:
-            os._exit(128 + signum)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            signal.signal(sig, _handler)
-        except Exception:
-            pass
-
+# CSV 安全表頭
+BASIC_HEADERS = ["統一編號", "公司名稱", "電話", "進口資格", "出口資格", "查詢時間"]
+GRADE_HEADERS = ["統一編號", "時間週期", "公司名稱", "公司名稱英文", "總進口實績", "總出口實績", "統計時間年", "查詢時間"]
 
 # =========================
-# 1) Logging 強化（檔案 + 主控台）
+# Logging（TimedRotatingFileHandler）
 # =========================
 os.makedirs("./logs", exist_ok=True)
 logger = logging.getLogger("tradeAdmin")
 logger.setLevel(logging.INFO)
 
-# 檔案
-_fh = logging.FileHandler("./logs/tradeAdmin.log", encoding="utf-8")
-_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-# 主控台
-_sh = logging.StreamHandler()
-_sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-
+# 避免重複加入 handler（多次 import/執行）
 if not logger.handlers:
-    logger.addHandler(_fh)
-    logger.addHandler(_sh)
+    from logging.handlers import TimedRotatingFileHandler
+
+    # 檔案輪轉（每日）、保留14天
+    fh = TimedRotatingFileHandler(
+        "./logs/tradeAdmin_secure.log",
+        when="midnight",
+        backupCount=14,
+        encoding="utf-8",
+        utc=False
+    )
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+
+def _sleep_jitter(base: float = 0.25, span: float = 0.35):
+    time.sleep(base + random.random() * span)
 
 # =========================
-# 共同常數與小工具
+# 工具：遮罩敏感內容、URL 白名單檢查、CSV 注入防護
 # =========================
-# 時間管理
-TZ = ZoneInfo("Asia/Taipei")  # 统一取得時戳 亞洲 / 台北
-def now_ts() -> str:
-    return datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+def mask_value(v: Any, keep: int = 4) -> str:
+    s = "" if v is None else str(v)
+    if len(s) <= keep:
+        return "*" * len(s)
+    return s[:keep] + "*" * (len(s) - keep)
 
-# 統一呼叫
-BASIC_HEADERS = ["統一編號", "公司名稱", "電話", "進口資格", "出口資格", "查詢時間"]
-GRADE_HEADERS = ["統一編號", "時間週期", "公司名稱", "公司名稱英文", "總進口實績", "總出口實績", "統計時間年", "查詢時間"]
-def add_basic_empty(exporter, uid: str):
-    exporter.add_basic([uid, "", "", "", "", now_ts()])
-def add_grade_empty(exporter, uid: str):
-    exporter.add_grade([uid, "", "", "", 0, 0, "", now_ts()])
-# 批次匯出機制
-def _minute_bucket(dt: datetime, step: int = 10) -> str:
-    m = (dt.minute // step) * step
-    return dt.strftime(f"%Y%m%d_%H{m:02d}")
-# 安全地轉換
+def mask_payload(d: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(d, dict):
+        return None
+    masked = {}
+    for k, v in d.items():
+        key = str(k).lower()
+        if any(s in key for s in ["verify", "token", "secret", "password"]):
+            masked[k] = mask_value(v)
+        else:
+            # 避免巨量 payload 打滿 log
+            s = "" if v is None else str(v)
+            masked[k] = s[:128] + ("..." if len(s) > 128 else "")
+    return masked
+
+def ensure_allowed_url(url: str):
+    """僅允許 https://fbfh.trade.gov.tw/..."""
+    p = urlparse(url)
+    if p.scheme.lower() != ALLOWED_SCHEME or p.hostname != ALLOWED_HOST:
+        raise RequestException(f"Blocked URL (scheme/host not allowed): {url}")
+
+def sanitize_csv_cell(val: Any) -> str:
+    """CSV 注入防護：若以 = + - @ 開頭，加上 ' 前綴。"""
+    s = "" if val is None else str(val)
+    if s and s[0] in ("=", "+", "-", "@"):
+        return "'" + s
+    return s
+
 def _safe_str(v: Any) -> str:
     return "" if v is None else str(v).strip()
 
 # 將級距代碼 A-M 轉為可讀字串與數值上下限
-# 回傳 (display, min_val, max_val)；max_val=None 代表無上限
-def normalize_band(val: Any):
+def normalize_band(val: Any) -> Tuple[str, Optional[float], Optional[float]]:
     s = (str(val) if val is not None else "").strip().upper()
-    # 先處理原本就可能是數字的情況
     try:
         if s and s.replace(".", "", 1).isdigit():
             v = float(s)
@@ -182,44 +156,238 @@ def normalize_band(val: Any):
         rng, lo, hi = mapping[s]
         return (f"{s} ({rng})", lo, hi)
 
-    # 無法辨識 → 回空
     return ("", None, None)
 
 # =========================
-# 2) 匯出器：分桶、append、只在新檔寫表頭；同時支援 upsert done 名單
+# 安全 Session 與 HTTP Client
+# =========================
+def build_session() -> requests.Session:
+    s = requests.Session()
+    # 僅 mount https，不 mount http（避免降級/誤用）
+    adapter = HTTPAdapter(
+        pool_connections=64,
+        pool_maxsize=64,
+        max_retries=Retry(
+            total=5,
+            connect=5,
+            read=5,
+            status=5,
+            backoff_factor=0.6,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset({"GET", "POST"}),
+            raise_on_status=False,
+            respect_retry_after_header=True,
+        ),
+    )
+    s.mount("https://", adapter)
+
+    # 預設 header
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://fbfh.trade.gov.tw",
+        "Referer": "https://fbfh.trade.gov.tw/fb/web/queryBasicf.do",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+    })
+
+    # 額外：避免意外用到系統 Proxy
+    s.trust_env = False
+    return s
+
+class HttpClient:
+    """封裝 requests，統一錯誤處理與 retry 行為；必要時重建 Session；加入 circuit breaker 與風險控管。"""
+    def __init__(self):
+        self.session = build_session()
+        self.fail_streak = 0
+        self.rebuild_threshold = 8  # 連續失敗達門檻就重建
+        self.cb_open_until: Optional[float] = None  # circuit breaker 冷卻截止
+
+    def _check_circuit(self):
+        if self.cb_open_until and time.time() < self.cb_open_until:
+            raise RequestException("Circuit breaker open; cooling down")
+
+    def _open_circuit_if_needed(self):
+        if self.fail_streak >= CB_FAIL_THRESHOLD:
+            self.cb_open_until = time.time() + CB_COOLDOWN_SEC
+            logger.error(f"⚡ Circuit breaker OPEN for {CB_COOLDOWN_SEC}s (fail_streak={self.fail_streak})")
+
+    def rebuild(self):
+        try:
+            self.session.close()
+        except Exception:
+            pass
+        self.session = build_session()
+        self.fail_streak = 0
+        logger.warning("🔁 Session rebuilt due to consecutive failures")
+
+    def _log_request_summary(self, method: str, url: str, start: float, resp: Optional[requests.Response], payload=None, err: Optional[Exception] = None):
+        dur_ms = int((time.time() - start) * 1000)
+        status = resp.status_code if resp is not None else None
+        masked = mask_payload(payload)
+        try:
+            ensure_allowed_url(url)
+            url_ok = True
+        except Exception:
+            url_ok = False
+
+        msg = {
+            "method": method,
+            "url": url,
+            "url_allowed": url_ok,
+            "status": status,
+            "duration_ms": dur_ms,
+            "fail_streak": self.fail_streak,
+            "payload_masked": masked,
+            "error": str(err) if err else "",
+        }
+        # 控制 log 體積
+        logger.info(f"[HTTP] {msg}")
+
+    def _enforce_limits(self, resp: requests.Response):
+        # 回應大小上限
+        size = 0
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            size += len(chunk)
+            if size > MAX_RESPONSE_BYTES:
+                raise RequestException(f"Response too large: {size} bytes")
+        # 讀完後將內容放回以便後續 json() 使用
+        resp._content = resp.content  # type: ignore
+
+    def _request(self, method: str, url: str, *, timeout=DEFAULT_TIMEOUT, stream=False, **kwargs) -> requests.Response:
+        start = time.time()
+        payload = kwargs.get("data") or kwargs.get("json") or None
+        resp = None
+
+        # SSRF/白名單檢查
+        ensure_allowed_url(url)
+        self._check_circuit()
+
+        try:
+            resp = self.session.request(method, url, timeout=timeout, stream=True, **kwargs)
+            self._enforce_limits(resp)
+            self.fail_streak = 0
+            _sleep_jitter()
+            self._log_request_summary(method, url, start, resp, payload=payload)
+            return resp
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            self.fail_streak += 1
+            self._open_circuit_if_needed()
+            logger.warning(f"🌐 transient error ({self.fail_streak}): {e}")
+            if self.fail_streak >= self.rebuild_threshold:
+                self.rebuild()
+            self._log_request_summary(method, url, start, resp, payload=payload, err=e)
+            raise
+        except Exception as e:
+            self.fail_streak += 1
+            self._open_circuit_if_needed()
+            logger.error(f"HTTP error: {e}")
+            self._log_request_summary(method, url, start, resp, payload=payload, err=e)
+            raise
+
+    def post_form(self, url: str, data: dict, *, timeout=DEFAULT_TIMEOUT, headers: dict | None = None) -> requests.Response:
+        return self._request("POST", url, data=data, headers=headers, timeout=timeout)
+
+    def post_json(self, url: str, json: dict, *, timeout=DEFAULT_TIMEOUT, headers: dict | None = None) -> requests.Response:
+        h = {}
+        if headers:
+            h.update(headers)
+        h.setdefault("Content-Type", "application/json;charset=UTF-8")
+        return self._request("POST", url, json=json, headers=h, timeout=timeout)
+
+# =========================
+# 安全收尾：中斷訊號 flush（exporter + logger）
+# =========================
+def flush_all_handlers():
+    for h in logger.handlers:
+        try:
+            h.flush()
+        except Exception:
+            pass
+
+def install_signal_handlers(exporter: "BucketCsvExporter"):
+    def _handler(signum, frame):
+        logger.warning(f"⚠️ received signal {signum}, flushing buffers...")
+        try:
+            exporter.flush()
+            flush_all_handlers()
+        finally:
+            sys.exit(128 + signum)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handler)
+        except Exception:
+            pass
+
+# =========================
+# 匯出器（CSV 原子寫入 + CSV 注入防護）
 # =========================
 class BucketCsvExporter:
     """
     固定檔名版本：
     - basic 寫入 ./output/basic_info.csv
     - grade 寫入 ./output/export_import_grade.csv
-    - 仍維持每 10 分鐘 flush 緩存（避免太頻繁 I/O）
+    - 每 X 分鐘 flush 緩存（避免太頻繁 I/O）
+    - 原子寫入：tmp -> replace（降低部分寫入風險）
     """
     def __init__(self, output_dir="./output", flush_minutes=10, encoding="utf-8-sig"):
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
         self.encoding = encoding
 
-        # 固定檔名
         self.basic_path = os.path.join(self.output_dir, "basic_info.csv")
         self.grade_path = os.path.join(self.output_dir, "export_import_grade.csv")
 
-        # 緩存 & flush 設定
         self.basic_buffer: List[List[Any]] = []
         self.grade_buffer: List[List[Any]] = []
         self.flush_window_sec = flush_minutes * 60
         self._last_export_ts = time.time()
 
-        # 如果檔案不存在，先寫表頭
         self._ensure_headers()
 
+    def _atomic_append_rows(self, path: str, rows: List[List[Any]], header_len: int):
+        if not rows:
+            return
+
+        # 校驗列長度 + CSV 注入防護
+        fixed: List[List[str]] = []
+        for idx, r in enumerate(rows, 1):
+            # 長度調整
+            if len(r) < header_len:
+                r = r + [""] * (header_len - len(r))
+                logger.warning(f"修正行長度（{path} 第{idx}列）：補空值")
+            elif len(r) > header_len:
+                r = r[:header_len]
+                logger.warning(f"截斷行長度（{path} 第{idx}列）：截斷多餘欄位")
+
+            # 注入防護
+            fixed.append([sanitize_csv_cell(x) for x in r])
+
+        # 原子寫入：先將舊檔 + 新行寫成 tmp，再 replace
+        tmp_path = path + ".tmp"
+        if os.path.exists(path):
+            # 讀舊檔（避免重複表頭）
+            with open(path, "r", encoding=self.encoding, newline="") as f_in, \
+                 open(tmp_path, "w", encoding=self.encoding, newline="") as f_out:
+                for line in f_in:
+                    f_out.write(line)
+                writer = csv.writer(f_out)
+                writer.writerows(fixed)
+        else:
+            # 新檔：寫表頭 + rows
+            headers = BASIC_HEADERS if path.endswith("basic_info.csv") else GRADE_HEADERS
+            with open(tmp_path, "w", encoding=self.encoding, newline="") as f_out:
+                writer = csv.writer(f_out)
+                writer.writerow(headers)
+                writer.writerows(fixed)
+        os.replace(tmp_path, path)
+
     def _ensure_headers(self):
-        if not os.path.exists(self.basic_path):
-            with open(self.basic_path, "w", newline="", encoding=self.encoding) as f:
-                csv.writer(f).writerow(BASIC_HEADERS)
-        if not os.path.exists(self.grade_path):
-            with open(self.grade_path, "w", newline="", encoding=self.encoding) as f:
-                csv.writer(f).writerow(GRADE_HEADERS)
+        def _ensure(path: str, headers: List[str]):
+            if not os.path.exists(path):
+                with open(path, "w", newline="", encoding=self.encoding) as f:
+                    csv.writer(f).writerow(headers)
+        _ensure(self.basic_path, BASIC_HEADERS)
+        _ensure(self.grade_path, GRADE_HEADERS)
 
     def add_basic(self, row: List[Any]):
         self.basic_buffer.append(row)
@@ -227,27 +395,9 @@ class BucketCsvExporter:
     def add_grade(self, row: List[Any]):
         self.grade_buffer.append(row)
 
-    def _append_rows(self, path: str, rows: List[List[Any]], header_len: int):
-        if not rows:
-            return
-        # 校驗列長度，不足則補空，多了則截斷
-        fixed = []
-        for idx, r in enumerate(rows, 1):
-            if len(r) < header_len:
-                fixed.append(r + [""] * (header_len - len(r)))
-                logger.warning(f"修正行長度（{path} 第{idx}列）：原len={len(r)} < {header_len}")
-            elif len(r) > header_len:
-                fixed.append(r[:header_len])
-                logger.warning(f"截斷行長度（{path} 第{idx}列）：原len={len(r)} > {header_len}")
-            else:
-                fixed.append(r)
-
-        with open(path, "a", newline="", encoding=self.encoding) as f:
-            csv.writer(f).writerows(fixed)
-
     def flush(self):
-        self._append_rows(self.basic_path, self.basic_buffer, header_len=len(BASIC_HEADERS))  # 列 長度檢查 基本資料
-        self._append_rows(self.grade_path, self.grade_buffer, header_len=len(GRADE_HEADERS))  # # 列 長度檢查 實績級距
+        self._atomic_append_rows(self.basic_path, self.basic_buffer, header_len=len(BASIC_HEADERS))
+        self._atomic_append_rows(self.grade_path, self.grade_buffer, header_len=len(GRADE_HEADERS))
         flushed_basic = len(self.basic_buffer)
         flushed_grade = len(self.grade_buffer)
 
@@ -267,11 +417,9 @@ class BucketCsvExporter:
 # =========================
 def load_target_ids(input_csv: str) -> List[str]:
     df = pd.read_csv(input_csv, dtype=str, encoding="utf-8-sig", usecols=["統一編號"])
-    ids = (df["統一編號"]
-           .dropna()
-           .astype(str)
-           .str.strip()
-           .tolist())
+    ids = (
+        df["統一編號"].dropna().astype(str).str.strip().tolist()
+    )
     # 去重且保留原始順序
     seen = set()
     unique_ids = []
@@ -281,7 +429,6 @@ def load_target_ids(input_csv: str) -> List[str]:
             seen.add(x)
     return unique_ids
 
-# 判斷已完成標準
 def load_done_ids_from_outputs(output_dir: str) -> Set[str]:
     if not os.path.isdir(output_dir):
         return set()
@@ -298,7 +445,10 @@ def load_done_ids_from_outputs(output_dir: str) -> Set[str]:
 
 def export_pending_ids(all_ids: Iterable[str], done_ids: Set[str], pending_path: str):
     pend = [cid for cid in all_ids if cid not in done_ids]
-    pd.DataFrame({"統一編號": pend}).to_csv(pending_path, index=False, encoding="utf-8-sig")
+    # 原子寫入
+    tmp = pending_path + ".tmp"
+    pd.DataFrame({"統一編號": pend}).to_csv(tmp, index=False, encoding="utf-8-sig")
+    os.replace(tmp, pending_path)
     logger.info(f"📄 未完成名單已輸出：{pending_path}（未完成 {len(pend)} 筆）")
 
 # =========================
@@ -310,7 +460,7 @@ class tradeAdmin:
     VERIFY_URL = "https://fbfh.trade.gov.tw/fb/web/queryBasicf.do"
 
     def __init__(self, exporter: BucketCsvExporter):
-        self.http = HttpClient()  # 統一用 http.post_form / http.post_json
+        self.http = HttpClient()
         self.headers = {
             "User-Agent": "Mozilla/5.0",
             "Referer": "https://fbfh.trade.gov.tw/fb/web/queryBasicf.do",
@@ -321,10 +471,9 @@ class tradeAdmin:
         self.codesCom = ""          # 當前目標統編
         self.verifySHidden = ""     # 由 initialize() 取得
         self.api_payload: Dict[str, Any] = {}
-        self.exporter = exporter    # 外部注入的分桶匯出器
+        self.exporter = exporter
 
-    # --- 取得 verifySHidden ---
-    def initialize(self, codesCom: str):
+    def initialize(self, codesCom: str) -> bool:
         self.codesCom = codesCom
         logger.info(f"=== 處理公司：{self.codesCom} ===")
         try:
@@ -336,11 +485,7 @@ class tradeAdmin:
                 "q_BanNo": self.codesCom,
                 "q_ieType": "E",
             }
-            res = self.http.post_form(
-                self.VERIFY_URL,
-                data=payload,
-                headers=self.headers
-            )
+            res = self.http.post_form(self.VERIFY_URL, data=payload, headers=self.headers)
             res.raise_for_status()
             soup = BeautifulSoup(res.text, "html.parser")
             el = soup.find("input", {"name": "verifySHidden"})
@@ -348,22 +493,20 @@ class tradeAdmin:
                 raise ValueError("verifySHidden 取得失敗")
             self.verifySHidden = el["value"]
             self.api_payload = {"banNo": self.codesCom, "verifySHidden": self.verifySHidden}
-            logger.info(f"✅ verifySHidden 擷取成功：{self.verifySHidden}")
-        except (Timeout, RequestException) as e:  # 空包也落檔（至少把統編寫出去）
+            logger.info(f"✅ verifySHidden 擷取成功：{mask_value(self.verifySHidden)}")
+        except (Timeout, RequestException) as e:
             logger.error(f"❌ 初始化連線錯誤：{e}")
             self.exporter.add_basic([self.codesCom, "", "", "", "", now_ts()])
             self.exporter.add_grade([self.codesCom, "", "", "", 0, 0, "", now_ts()])
             return False
-        except Exception as e:  # 解析錯誤也落檔
+        except Exception as e:
             logger.error(f"❌ 初始化解析錯誤：{e}")
             self.exporter.add_basic([self.codesCom, "", "", "", "", now_ts()])
             self.exporter.add_grade([self.codesCom, "", "", "", 0, 0, "", now_ts()])
             return False
         return True
 
-    # 自動重打 if 遇到 retrieveDataList 缺失, initialize 以外的補救
     def _refresh_token_and_retry(self, api: str, is_json=True, *, timeout=DEFAULT_TIMEOUT):
-        # 重新抓 verifySHidden
         try:
             payload = {
                 "state": "queryAll",
@@ -379,12 +522,11 @@ class tradeAdmin:
             el = soup.find("input", {"name": "verifySHidden"})
             self.verifySHidden = el["value"]
             self.api_payload = {"banNo": self.codesCom, "verifySHidden": self.verifySHidden}
-            logger.info(f"[{self.codesCom}] 🔄 token refreshed: {self.verifySHidden}")
+            logger.info(f"[{self.codesCom}] 🔄 token refreshed: {mask_value(self.verifySHidden)}")
         except Exception as e:
             logger.warning(f"[{self.codesCom}] token refresh failed: {e}")
             return None
 
-        # 再打一次
         try:
             if is_json:
                 r2 = self.http.post_json(api, json=self.api_payload, headers=self.headers, timeout=timeout)
@@ -396,14 +538,17 @@ class tradeAdmin:
             logger.warning(f"[{self.codesCom}] retry after token refresh failed: {e}")
             return None
 
-    # --- 先探測是否有資料（空包也寫出統編） ---
     def has_data(self) -> bool:
         try:
             res = self.http.session.post(
                 self.BASIC_API,
                 json=self.api_payload,
-                headers=self.headers
+                headers=self.headers,
+                timeout=DEFAULT_TIMEOUT,
+                stream=True
             )
+            # 也做大小限制
+            self.http._enforce_limits(res)
             res.raise_for_status()
             data = res.json()
             time.sleep(0.3)
@@ -415,30 +560,30 @@ class tradeAdmin:
             logger.warning(f"[{self.codesCom}] 探測失敗（解析）：{e}")
             return False
 
-    # --- 基本資料 ---
     def get_basicData(self):
         try:
             res = self.http.session.post(
                 self.BASIC_API,
                 json=self.api_payload,
-                headers=self.headers
+                headers=self.headers,
+                timeout=DEFAULT_TIMEOUT,
+                stream=True
             )
+            self.http._enforce_limits(res)
             res.raise_for_status()
             data = res.json()
 
-            # 自動重打
             if not isinstance(data, dict) or "retrieveDataList" not in data:
                 r2 = self._refresh_token_and_retry(self.BASIC_API, is_json=True)
                 if r2 is not None:
                     data = r2.json()
 
             lst = data.get("retrieveDataList") or []
-            if not lst:  # 空包也要落檔
-                self.exporter.add_basic([self.codesCom, "", "", "", now_ts()])
+            if not lst:
+                self.exporter.add_basic([self.codesCom, "", "", "", "", now_ts()])
                 logger.info(f"[{self.codesCom}] 無基本資料：已以空值落檔")
                 return
             company = lst[0]
-            # 索引：0=統編, 1=公司名, 8=電話, 19/20=進出口資格
             row = [
                 _safe_str(company[0]),
                 _safe_str(company[1]),
@@ -456,18 +601,19 @@ class tradeAdmin:
             logger.error(f"[{self.codesCom}] ❌ 基本資料解析錯誤：{e}")
             self.exporter.add_basic([self.codesCom, "", "", "", "", now_ts()])
 
-    # --- 實績級距 ---
     def get_gradeData(self):
         try:
             res = self.http.session.post(
                 self.GRADE_API,
                 json=self.api_payload,
                 headers=self.headers,
+                timeout=DEFAULT_TIMEOUT,
+                stream=True
             )
+            self.http._enforce_limits(res)
             res.raise_for_status()
             data = res.json()
 
-            # 自動重打
             if not isinstance(data, dict) or "retrieveDataList" not in data:
                 r2 = self._refresh_token_and_retry(self.BASIC_API, is_json=True)
                 if r2 is not None:
@@ -475,25 +621,21 @@ class tradeAdmin:
 
             records = data.get("retrieveDataList") or []
             if not records:
-                # 空包也落檔：至少寫入統編一列
-                self.exporter.add_grade([self.codesCom, "", "", 0, 0, "", now_ts()])
+                self.exporter.add_grade([self.codesCom, "", "", "", 0, 0, "", now_ts()])
                 logger.info(f"[{self.codesCom}] 無實績資料：已以空值落檔")
                 return
-            # 你原本是直接 extend records，這裡保守轉成固定欄順序
+
             for r in records:
-                # r 需能對應你原本 CSV 欄位的順序；若 API 結構不同，這裡做最小映射
-                # 先盡量保有統編，如果 API 有年/期等欄位，可替換下方欄位
                 row = [
                     _safe_str(r[0]) if len(r) > 0 else self.codesCom,  # 統一編號
                     _safe_str(r[1]) if len(r) > 1 else "",             # 時間週期
                     _safe_str(r[2]) if len(r) > 2 else "",             # 公司名稱
                     _safe_str(r[3]) if len(r) > 3 else "",             # 公司名稱英文
-                    normalize_band(r[4])[0] if len(r) > 4 else "",  # 總進口實績（以可讀字串呈現，如 "A (>=10)"）
-                    normalize_band(r[5])[0] if len(r) > 5 else "",  # 總出口實績
-                    _safe_str(r[6]) if len(r) > 6 else "",            # 統計時間年
+                    normalize_band(r[4])[0] if len(r) > 4 else "",     # 總進口實績
+                    normalize_band(r[5])[0] if len(r) > 5 else "",     # 總出口實績
+                    _safe_str(r[6]) if len(r) > 6 else "",             # 統計時間年
                     now_ts()
                 ]
-                # 若 API 並未帶統編，把 self.codesCom 回填
                 if not row[0]:
                     row[0] = self.codesCom
                 self.exporter.add_grade(row)
@@ -505,8 +647,10 @@ class tradeAdmin:
             logger.error(f"[{self.codesCom}] ❌ 實績級距解析錯誤：{e}")
             self.exporter.add_grade([self.codesCom, "", "", "", 0, 0, "", now_ts()])
 
+# =========================
+# 批次/續跑工具
+# =========================
 class Toolbox:
-    """批次分段/續跑工具"""
     @staticmethod
     def slice_by_range(ids: List[str], start: int | None, end: int | None) -> List[str]:
         n = len(ids)
@@ -522,7 +666,6 @@ class Toolbox:
             raise ValueError("invalid shard config")
         out = []
         for uid in ids:
-            # 穩定切片：用 uid 的 hash，而不是 enumerate 的 index
             if (abs(hash(uid)) % shard_total) == shard_idx:
                 out.append(uid)
         return out
@@ -533,7 +676,6 @@ class Toolbox:
             raise ValueError("invalid mod/rem")
         return [uid for i, uid in enumerate(ids) if (i % mod) == rem]
 
-    # --- 續跑標記：簡易版（以處理的最後一個 index 記錄） ---
     @staticmethod
     def read_marker(path: str) -> int | None:
         try:
@@ -557,9 +699,8 @@ class Toolbox:
     def filter_excluding_done(ids: List[str], done: set[str]) -> List[str]:
         return [uid for uid in ids if uid not in done]
 
-
 # =========================
-# 5) Main：套用 X 分鐘批次匯出 + 完成/未完成名單
+# Main：批次匯出 + 完成/未完成名單
 # =========================
 def main():
     INPUT_IDS = "./intput/250808需求/250808需求_169911筆目標統編_資本額1000萬up.csv"
@@ -567,17 +708,18 @@ def main():
     PENDING_PATH = os.path.join(OUTPUT_DIR, "pending_ids.csv")
 
     exporter = BucketCsvExporter(output_dir=OUTPUT_DIR, flush_minutes=1)
+    install_signal_handlers(exporter)
     ta = tradeAdmin(exporter)
 
     all_ids = load_target_ids(INPUT_IDS)
-    hist_done = load_done_ids_from_outputs(OUTPUT_DIR)  # 歷史已完成（舊檔）
-    sess_done: set[str] = set()  # 本輪已完成
+    hist_done = load_done_ids_from_outputs(OUTPUT_DIR)
+    sess_done: set[str] = set()
 
     total = len(all_ids)
     logger.info(f"總目標 {total:,}，歷史已完成 {len(hist_done):,}，尚待 {total - len(hist_done):,}")
 
-    for idx, uid in enumerate(all_ids, start=5):
-        if uid in hist_done or uid in sess_done:  # 首先檢查該統編是否跑過
+    for idx, uid in enumerate(all_ids, start=1):
+        if uid in hist_done or uid in sess_done:
             continue
 
         ok_init = ta.initialize(uid)
@@ -585,8 +727,6 @@ def main():
         if ok_init:
             ta.get_basicData()
             ta.get_gradeData()
-        else:  # initialize 失敗時，上面已經加空包；這裡不用重複加
-            pass
 
         sess_done.add(uid)
         exporter.export_if_due()
@@ -596,12 +736,20 @@ def main():
             logger.info(f"進度 {idx:,}/{total:,} | 本輪完成 {len(sess_done):,} | 尚待 {remaining:,}")
 
     exporter.flush()
+    flush_all_handlers()
 
-    # 以「歷史 + 本輪」為已完成集合，輸出未完成名單
     all_done = hist_done | sess_done
     pend = [cid for cid in all_ids if cid not in all_done]
-    pd.DataFrame({"統一編號": pend}).to_csv(PENDING_PATH, index=False, encoding="utf-8-sig")
+    tmp = PENDING_PATH + ".tmp"
+    pd.DataFrame({"統一編號": pend}).to_csv(tmp, index=False, encoding="utf-8-sig")
+    os.replace(tmp, PENDING_PATH)
     logger.info(f"🎉 全程完成。本輪完成 {len(sess_done):,}，歷史+本輪合計 {len(all_done):,}，未完成 {len(pend):,}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.exception(f"Uncaught error: {e}")
+        flush_all_handlers()
+        raise
+
