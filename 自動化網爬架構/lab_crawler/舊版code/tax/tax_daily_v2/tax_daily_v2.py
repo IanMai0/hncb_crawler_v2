@@ -186,9 +186,10 @@ def new_taxrc():
     cursor = mydb.cursor()
 
     # 1) 計數：Tmp_TaxInfo 對 TaxInfo 最新一筆的差異（含新統編）
+    # 當日異動
     count_sql = """
     SELECT COUNT(*)
-    FROM crawlerdb.Tmp_TaxInfo a
+    FROM crawlerdb.Tmp_TaxInfo a  
     LEFT JOIN crawlerdb.TaxInfo t
       ON t.Party_ID = a.Party_ID
     LEFT JOIN crawlerdb.TaxInfo t2

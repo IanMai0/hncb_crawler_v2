@@ -5,6 +5,11 @@ crawler_etl.py
 - CSV 第2行（META行）日期檢查
 - 原封不動寫入 tmp_rawData
 - 由 raw 做 ETL，寫入 tmp_taxInfo
+
+重點修正：
+- Python 3.13 + OpenSSL 對憑證鏈更嚴格，eip.fia.gov.tw 可能觸發
+  SSLCertVerificationError: Missing Subject Key Identifier
+- 改為「先嚴格驗證 -> 再系統驗證 -> 最後才 verify=False」三段式 fallback
 """
 
 from __future__ import annotations
@@ -14,9 +19,15 @@ import csv
 import re
 import shutil
 import zipfile
-import urllib.request
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional, Tuple
+
+import requests
+
+try:
+    import certifi
+except Exception:
+    certifi = None  # fallback: 沒裝也能跑
 
 from db_loader import (
     get_logger,
@@ -93,12 +104,90 @@ def parse_meta_date(s: Optional[str]) -> Optional[date]:
     if not s:
         return None
     s = str(s).strip()
-    # 格式：DD-MON-YY
     try:
         dt = datetime.strptime(s, "%d-%b-%y")
         return dt.date()
     except ValueError:
         return None
+
+
+# =========================
+# 下載（含 SSL fallback）
+# =========================
+def _download_file(url: str, out_path: str, logger, timeout: int = 120, max_retry: int = 3) -> None:
+    """
+    三段式下載策略（避免政府站 SSL 鏈問題讓批次全掛）：
+
+    1) verify=certifi.where()（若可用）
+    2) verify=True（系統 CA）
+    3) verify=False（不驗證，最後手段；會強烈警告）
+
+    可用環境變數控制：
+    - DOWNLOAD_SSL_MODE:
+        "strict"  => 只跑 (1)(2)，不允許 (3)
+        "auto"    => (1)(2)失敗就允許(3)  [預設]
+        "insecure"=> 直接用 verify=False（不建議，除非你就是要硬跑）
+    """
+    mode = (os.getenv("DOWNLOAD_SSL_MODE", "auto") or "auto").strip().lower()
+    if mode not in {"strict", "auto", "insecure"}:
+        mode = "auto"
+
+    # 建立 verify 候選清單
+    verify_candidates: List[Any] = []
+
+    if mode == "insecure":
+        verify_candidates = [False]
+    else:
+        if certifi is not None:
+            verify_candidates.append(certifi.where())  # certifi CA bundle
+        verify_candidates.append(True)  # 系統 CA
+        if mode == "auto":
+            verify_candidates.append(False)  # 最後手段
+
+    headers = {
+        "User-Agent": "HNBC-GCIS-Pipeline/2.0 (+https://example.com)"
+    }
+
+    last_err: Optional[Exception] = None
+
+    # 先下載到暫存檔，成功再 replace（避免半套檔案被當成功）
+    tmp_path = out_path + ".part"
+
+    for verify in verify_candidates:
+        verify_label = "certifi" if (certifi is not None and verify == certifi.where()) else ("system" if verify is True else "NO_VERIFY")
+        if verify is False:
+            logger.warning("⚠️ 進入「不驗證 SSL」下載模式（最後手段）。這代表你信任目標站點與網路環境。")
+
+        for attempt in range(1, max_retry + 1):
+            try:
+                logger.info(f"下載中：{url} (attempt={attempt}/{max_retry}, verify={verify_label})")
+
+                with requests.get(url, stream=True, timeout=timeout, verify=verify, headers=headers) as r:
+                    r.raise_for_status()
+                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                    with open(tmp_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
+
+                os.replace(tmp_path, out_path)
+                return
+
+            except requests.exceptions.SSLError as e:
+                last_err = e
+                logger.warning(f"SSL 驗證失敗：{e}")
+            except Exception as e:
+                last_err = e
+                logger.warning(f"下載失敗：{e}")
+
+    # 清理殘檔
+    try:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    except Exception:
+        pass
+
+    raise RuntimeError(f"下載失敗（所有 SSL 模式 + 重試皆失敗）：{last_err}")
 
 
 # =========================
@@ -109,6 +198,7 @@ def download_and_extract(work_dir: str) -> Tuple[str, str, datetime]:
     回傳：
       local_zip_path, local_csv_path, downloaded_at
     """
+    logger = get_logger()
     os.makedirs(work_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -119,12 +209,11 @@ def download_and_extract(work_dir: str) -> Tuple[str, str, datetime]:
 
     downloaded_at = datetime.now()
 
-    # 下載
-    urllib.request.urlretrieve(SOURCE_URL, zip_path)
+    # 下載（含 SSL fallback）
+    _download_file(SOURCE_URL, zip_path, logger=logger, timeout=120, max_retry=3)
 
     # 解壓：只取 BGMOPEN1.csv，並改名為帶時間戳的檔名
     with zipfile.ZipFile(zip_path, "r") as zf:
-        # 嘗試找出 zip 內的 csv（通常叫 BGMOPEN1.csv）
         members = zf.namelist()
         target = None
         for m in members:
@@ -135,7 +224,6 @@ def download_and_extract(work_dir: str) -> Tuple[str, str, datetime]:
             raise RuntimeError(f"ZIP 內找不到 BGMOPEN1.csv，內容：{members[:10]} ...")
 
         extracted_path = zf.extract(target, path=work_dir)
-        # 改名成帶時間戳的 csv
         shutil.move(extracted_path, csv_path)
 
     return zip_path, csv_path, downloaded_at
@@ -194,7 +282,6 @@ def csv_to_tmp_raw(conn, run_id: str, zip_path: str, csv_path: str, downloaded_a
 def raw_to_clean_etl(conn, run_id: str, source_file_date: date) -> int:
     logger = get_logger()
 
-    # 讀 raw 的 DATA 行（row_type=DATA）
     sql = """
     SELECT row_num,
            c01 AS party_addr, c02 AS party_id, c03 AS parent_party_id, c04 AS party_name,
@@ -212,7 +299,6 @@ def raw_to_clean_etl(conn, run_id: str, source_file_date: date) -> int:
         for r in cur.fetchall():
             party_id = normalize_text_keep_spaces(r.get("party_id"))
             if not party_id:
-                # 統編空的，直接跳過（也可以改成寫入異常表）
                 continue
 
             row: Dict[str, Any] = {
@@ -237,7 +323,6 @@ def raw_to_clean_etl(conn, run_id: str, source_file_date: date) -> int:
                 "ind_name3": normalize_text_keep_spaces(r.get("ind_name3")),
             }
 
-            # setup_date 轉成 YYYY-MM-DD（MySQL DATE）
             if isinstance(row["setup_date"], date):
                 row["setup_date"] = row["setup_date"].strftime("%Y-%m-%d")
             else:
@@ -245,7 +330,6 @@ def raw_to_clean_etl(conn, run_id: str, source_file_date: date) -> int:
 
             clean_rows.append(row)
 
-    # 寫入 tmp_taxInfo（不清空，因為用 run_id 區分）
     inserted = insert_tmp_taxinfo(conn, clean_rows, logger=logger)
     return inserted
 
@@ -256,9 +340,31 @@ def raw_to_clean_etl(conn, run_id: str, source_file_date: date) -> int:
 def validate_file_date_or_raise(source_file_date: date) -> None:
     logger = get_logger()
 
+    strict = (os.getenv("STRICT_FILE_DATE", "1").strip().lower() not in {"0", "false", "no", "off"})
+    expect = (os.getenv("EXPECT_FILE_DATE") or os.getenv("BACKFILL_FILE_DATE") or "").strip()
+
+    if not strict:
+        logger.warning(f"⚠️ 已停用嚴格檔案日期檢查：source_file_date={source_file_date} (STRICT_FILE_DATE=0)")
+        return
+
+    if expect:
+        try:
+            expected_date = datetime.strptime(expect, "%Y-%m-%d").date()
+        except ValueError:
+            msg = f"❌ EXPECT_FILE_DATE 格式錯誤，需 YYYY-MM-DD，收到：{expect}"
+            logger.error(msg)
+            raise RuntimeError(msg)
+
+        if source_file_date != expected_date:
+            msg = f"❌ 檔案日期不匹配：CSV第2行日期={source_file_date}，期望日期={expected_date} (EXPECT_FILE_DATE)"
+            logger.error(msg)
+            raise RuntimeError(msg)
+
+        logger.info(f"✅ 檔案日期檢查通過：{source_file_date}（符合 EXPECT_FILE_DATE={expected_date}）")
+        return
+
     today = datetime.now().date()
     if source_file_date != today:
-        # 你要的是「匹配」，我這裡採用嚴格模式：不匹配就擋住（避免寫錯日）
         msg = f"❌ 檔案日期不匹配：CSV第2行日期={source_file_date}，批次執行日={today}"
         logger.error(msg)
         raise RuntimeError(msg)
@@ -284,7 +390,6 @@ def run_download_raw_etl(work_dir: str, run_id: str) -> Dict[str, Any]:
         file_date = csv_to_tmp_raw(conn, run_id, zip_path, csv_path, downloaded_at)
         logger.info(f"✅ META 日期解析：{file_date}")
 
-        # 檔案完整性 / 日期檢查（嚴格擋）
         validate_file_date_or_raise(file_date)
 
         clean_cnt = raw_to_clean_etl(conn, run_id, file_date)
@@ -299,5 +404,8 @@ def run_download_raw_etl(work_dir: str, run_id: str) -> Dict[str, Any]:
             "clean_cnt": clean_cnt,
         }
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
         logger.info("=== 結束：下載 + raw 入庫 + ETL ===")

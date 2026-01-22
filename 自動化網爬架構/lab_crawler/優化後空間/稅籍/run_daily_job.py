@@ -17,8 +17,9 @@ from db_loader import (
     get_logger,
     connect_mysql,
     get_mysql_settings_from_env,
-    merge_tmp_to_main_taxinfo,
+    upsert_latest_taxinfo,
 )
+
 from crawler_etl import run_download_raw_etl
 
 
@@ -65,7 +66,9 @@ def main():
     conn = connect_mysql(cfg)
     try:
         verify_counts(conn, run_id, logger)
-        merge_result = merge_tmp_to_main_taxinfo(conn, run_id, logger)
+        # merge_result = merge_tmp_to_main_taxinfo(conn, run_id, logger)  # 舊版本
+        merge_result = upsert_latest_taxinfo(conn, run_id, logger)
+
         logger.info(f"✅ main merge 結果：{merge_result}")
     finally:
         conn.close()

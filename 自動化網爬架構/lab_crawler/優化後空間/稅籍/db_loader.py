@@ -18,6 +18,12 @@ from dataclasses import dataclass
 from datetime import datetime, date
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # 會自動讀取同層或上層的 .env
+
+
 import pymysql
 
 
@@ -219,38 +225,39 @@ def upsert_latest_taxinfo(
 
     upsert_sql = """
     INSERT INTO crawlerdb.taxInfo (
-      party_id, party_addr, parent_party_id, party_name, paidin_capital, setup_date,
-      party_type, use_invoice,
+      party_id,
+      party_addr, parent_party_id, party_name, paidin_capital, setup_date, party_type, use_invoice,
       ind_code, ind_name, ind_code1, ind_name1, ind_code2, ind_name2, ind_code3, ind_name3,
-      row_hash, source_file_date, last_run_id
+      row_hash,
+      source_file_date, last_run_id
     )
     SELECT
-      t.party_id, t.party_addr, t.parent_party_id, t.party_name, t.paidin_capital, t.setup_date,
-      t.party_type, t.use_invoice,
+      t.party_id,
+      t.party_addr, t.parent_party_id, t.party_name, t.paidin_capital, t.setup_date, t.party_type, t.use_invoice,
       t.ind_code, t.ind_name, t.ind_code1, t.ind_name1, t.ind_code2, t.ind_name2, t.ind_code3, t.ind_name3,
-      t.row_hash, t.source_file_date, t.run_id
+      t.row_hash,
+      t.source_file_date, t.run_id
     FROM crawlerdb.tmp_taxInfo t
     WHERE t.run_id = %s
     ON DUPLICATE KEY UPDATE
-      party_addr      = IF(VALUES(row_hash) <> row_hash, VALUES(party_addr), party_addr),
-      parent_party_id = IF(VALUES(row_hash) <> row_hash, VALUES(parent_party_id), parent_party_id),
-      party_name      = IF(VALUES(row_hash) <> row_hash, VALUES(party_name), party_name),
-      paidin_capital  = IF(VALUES(row_hash) <> row_hash, VALUES(paidin_capital), paidin_capital),
-      setup_date      = IF(VALUES(row_hash) <> row_hash, VALUES(setup_date), setup_date),
-      party_type      = IF(VALUES(row_hash) <> row_hash, VALUES(party_type), party_type),
-      use_invoice     = IF(VALUES(row_hash) <> row_hash, VALUES(use_invoice), use_invoice),
-      ind_code        = IF(VALUES(row_hash) <> row_hash, VALUES(ind_code), ind_code),
-      ind_name        = IF(VALUES(row_hash) <> row_hash, VALUES(ind_name), ind_name),
-      ind_code1       = IF(VALUES(row_hash) <> row_hash, VALUES(ind_code1), ind_code1),
-      ind_name1       = IF(VALUES(row_hash) <> row_hash, VALUES(ind_name1), ind_name1),
-      ind_code2       = IF(VALUES(row_hash) <> row_hash, VALUES(ind_code2), ind_code2),
-      ind_name2       = IF(VALUES(row_hash) <> row_hash, VALUES(ind_name2), ind_name2),
-      ind_code3       = IF(VALUES(row_hash) <> row_hash, VALUES(ind_code3), ind_code3),
-      ind_name3       = IF(VALUES(row_hash) <> row_hash, VALUES(ind_name3), ind_name3),
-      source_file_date= IF(VALUES(row_hash) <> row_hash, VALUES(source_file_date), source_file_date),
-      last_run_id     = IF(VALUES(row_hash) <> row_hash, VALUES(last_run_id), last_run_id),
-      updated_at      = IF(VALUES(row_hash) <> row_hash, CURRENT_TIMESTAMP(6), updated_at),
-      row_hash        = IF(VALUES(row_hash) <> row_hash, VALUES(row_hash), row_hash);
+      party_addr        = VALUES(party_addr),
+      parent_party_id   = VALUES(parent_party_id),
+      party_name        = VALUES(party_name),
+      paidin_capital    = VALUES(paidin_capital),
+      setup_date        = VALUES(setup_date),
+      party_type        = VALUES(party_type),
+      use_invoice       = VALUES(use_invoice),
+      ind_code          = VALUES(ind_code),
+      ind_name          = VALUES(ind_name),
+      ind_code1         = VALUES(ind_code1),
+      ind_name1         = VALUES(ind_name1),
+      ind_code2         = VALUES(ind_code2),
+      ind_name2         = VALUES(ind_name2),
+      ind_code3         = VALUES(ind_code3),
+      ind_name3         = VALUES(ind_name3),
+      row_hash          = VALUES(row_hash),
+      source_file_date  = VALUES(source_file_date),
+      last_run_id       = VALUES(last_run_id);
     """
 
     with conn.cursor() as cur:
