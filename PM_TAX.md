@@ -407,6 +407,110 @@ CREATE TABLE IF NOT EXISTS `crawlerdb`.`taxInfo` (
 
 
 ---
+## 版本開發差異
+# crawler_etl 系列版本差異說明（v1 → v3）
+
+本文說明稅籍日批管線中 **ETL 模組 (`crawler_etl*.py`) 的版本演進差異**，目的在於：
+
+- 說清楚每一版「實際在幹嘛」
+- 解釋為何需要升級到 v3
+- 哪些設計是「刻意為之」，而非多此一舉
+---
+## 一、crawler_etl.py（v1）
+
+### 版本定位
+**腳本型 ETL（Script-style ETL）**
+
+這是最初版本，重點在於「能跑就好」，不是完整 pipeline。
+
+### 實際行為
+- 下載 ZIP
+- 解壓 CSV
+- 直接用 `csv.reader()` 讀取 CSV
+- inline 清洗資料（空白、民國轉西元、數字）
+- 直接寫入舊版 `Tmp_TaxInfo`
+- 接著用複雜 SQL 比對 `Tmp_TaxInfo` 與 `TaxInfo`
+
+### 核心問題
+1. **沒有 raw data 概念**
+   - 原始資料未落地
+   - ETL 出錯後無法回溯、無法稽核
+
+2. **ETL、DB、流程耦合**
+   - 所有邏輯混在一個檔案
+   - 無法單獨測試或重跑某一階段
+
+3. **SQL 過度複雜**
+   - 使用 self-join + `t2 IS NULL` 取得最新版本
+   - 效能與正確性高度依賴 Update_Time
+
+4. **不可重跑**
+   - CSV 只存在記憶體中
+   - 失敗後只能重新下載
+
+### 一句話總結
+> v1 能跑，但不能信、不能查、不能重來。
+
+---
+
+## 二、crawler_etl_v2.py（v2）
+
+### 版本定位
+**開始 pipeline 化，但基礎尚未補齊**
+
+這一版是「已經知道問題在哪，但還在打好地基」。
+
+### 相較 v1 的改善
+1. **開始拆分 ETL function**
+   - 清洗邏輯不再全部 inline
+2. **嘗試整理流程順序**
+   - 下載 / ETL / DB 寫入概念上分開
+3. **開始重新思考 SQL**
+   - 討論 latest version、hash 比對、效能問題
+
+### 仍然存在的缺陷
+1. **仍然沒有 raw data**
+   - ETL 仍直接從 CSV → Tmp_TaxInfo
+2. **無法驗證 ETL 是否漏資料**
+   - 缺少 raw vs tmp 的筆數核對
+3. **CSV 仍是一次性輸入**
+   - 失敗仍需重跑下載
+4. **流程保護不足**
+   - 有些錯誤只記錄 log，未 hard fail
+
+---
+
+## 三、crawler_etl_v3.py（v3）
+
+### 版本定位
+**可稽核、可回補、可懷疑的正式 ETL 模組**
+這一版是完整 pipeline 思維落地後的成果。
+
+## v3 核心設計原則
+
+### 1️ Raw-first（第一級事實來源）
+- CSV 每一行（HEADER / META / DATA）
+- **全部先寫入 `tmp_rawData`**
+- raw table 是唯一可信來源（source of truth）
+
+### 2 強制不變量（Hard Invariant）
+- `tmp_rawData(DATA)` **必須等於** `Tmp_TaxInfo`
+- 不相等 → 批次直接失敗
+
+這是 v3 與前兩版最大的「質變」。
+
+### 3 職責完全分離
+- `crawler_etl_v3.py`
+  - 不知道 `TaxInfo` 的存在
+  - 不負責 tmp → main merge
+- ETL 的唯一輸出：**舊版 `Tmp_TaxInfo`**
+
+### 4️ 支援指定 CSV（回補 / 除錯）
+```bash
+python run_daily_job_v3.py --csv path/to/file.csv
+```
+
+---
 
 ## 總結
 
