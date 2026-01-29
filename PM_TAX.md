@@ -352,23 +352,23 @@ CREATE TABLE `taxinfo` (
 ## 資料欄位說明
 | 欄位英文 | 欄位中文 | 資料型態 | 範例 |
 | --- | --- | --- | --- |
-| party_id | 統一編號 | 半 pipeline ETL | 正式 ETL 模組 |
-| party_addr | 營業地址 | 直接讀 CSV | **僅從 tmp_rawData 讀取** |
-| parent_party_id | 總機構統一編號 | 無 | `tmp_rawData` |
-| party_name | 營業人名稱 | 無 | `tmp_rawData` |
-| paidin_capital | 資本額 | 無 | `tmp_rawData` |
-| setup_date | 設立日期 | 無 | `tmp_rawData` |
-| party_type | 組織別名稱 | 無 | `tmp_rawData` |
-| use_invoice | 使用統一發票 | 無 | `tmp_rawData` |
-| ind_code | 行業代號 | 無 | `tmp_rawData` |
-| ind_name | 名稱 | 無 | `tmp_rawData` |
-| ind_code1 | 行業代號1 | 無 | `tmp_rawData` |
-| ind_name1 | 名稱1 | 無 | `tmp_rawData` |
-| ind_code2 | 行業代號2 | 無 | `tmp_rawData` |
-| ind_name2 |  | 名稱2 | `tmp_rawData` |
-| ind_code3 | 行業代號3 | 無 | `tmp_rawData` |
-| ind_name3 | 名稱3 | 無 | `tmp_rawData` |
-| Update_Time | 更新時間 | 無 | `tmp_rawData` |
+| party_id | 統一編號 | varchar | 72373274 |
+| party_addr | 營業地址 | varchar | 南投縣中寮鄉廣福村中寮段０３０７－００１３地號 |
+| parent_party_id | 總機構統一編號 | int | 23285582 |
+| party_name | 營業人名稱 | varchar | 萊爾富國際股份有限公司第四六一一營業處 |
+| paidin_capital | 資本額 | bigint | 5000000 |
+| setup_date | 設立日期 | date | 2020-01-06 |
+| party_type | 組織別名稱 | varchar | 其它 |
+| use_invoice | 使用統一發票 | char(1) | Y |
+| ind_code | 行業代號 | int | 471,112 |
+| ind_name | 名稱 | varchar | 直營連鎖式便利商店 |
+| ind_code1 | 行業代號1 | int | 同上 |
+| ind_name1 | 名稱1 | varchar | 同上 |
+| ind_code2 | 行業代號2 | int | 同上 |
+| ind_name2 | 名稱2 | varchar | 同上 |
+| ind_code3 | 行業代號3 | int | 同上 |
+| ind_name3 | 名稱3 | varchar | 同上 |
+| Update_Time | 更新時間 | datetime | 2026-01-23 14:35:08 |
 
 ---
 
