@@ -345,24 +345,24 @@ CREATE TABLE IF NOT EXISTS `crawlerdb`.`tmp_taxInfo` (
 ### crawlerdb.taxInfo
 ```sql
 CREATE TABLE IF NOT EXISTS `crawlerdb`.`taxInfo` (
-  `party_id` VARCHAR(20) NOT NULL,
+  `party_id` VARCHAR(20) NOT NULL,  -- 統一編號
 
-  `party_addr` VARCHAR(300) NULL,
-  `parent_party_id` VARCHAR(20) NULL,
-  `party_name` VARCHAR(200) NULL,
-  `paidin_capital` BIGINT NULL,
-  `setup_date` DATE NULL,
-  `party_type` VARCHAR(50) NULL,
-  `use_invoice` CHAR(1) NULL,
+  `party_addr` VARCHAR(300) NULL,  -- 營業地址
+  `parent_party_id` VARCHAR(20) NULL,  -- 總機構統一編號
+  `party_name` VARCHAR(200) NULL,  -- 營業人名稱
+  `paidin_capital` BIGINT NULL,  -- 資本額
+  `setup_date` DATE NULL,  -- 設立日期
+  `party_type` VARCHAR(50) NULL,  -- 使用統一發票
+  `use_invoice` CHAR(1) NULL,  -- 行業代號
 
-  `ind_code` VARCHAR(20) NULL,
-  `ind_name` VARCHAR(100) NULL,
-  `ind_code1` VARCHAR(20) NULL,
-  `ind_name1` VARCHAR(100) NULL,
-  `ind_code2` VARCHAR(20) NULL,
-  `ind_name2` VARCHAR(100) NULL,
-  `ind_code3` VARCHAR(20) NULL,
-  `ind_name3` VARCHAR(100) NULL,
+  `ind_code` VARCHAR(20) NULL,  -- 行業代號
+  `ind_name` VARCHAR(100) NULL,  -- 名稱
+  `ind_code1` VARCHAR(20) NULL,  -- 行業代號1
+  `ind_name1` VARCHAR(100) NULL,  -- 名稱1
+  `ind_code2` VARCHAR(20) NULL,  -- 行業代號2
+  `ind_name2` VARCHAR(100) NULL,  -- 名稱2
+  `ind_code3` VARCHAR(20) NULL,  -- 行業代號3
+  `ind_name3` VARCHAR(100) NULL,  -- 名稱3
 
   `row_hash` CHAR(64) NOT NULL,
 
