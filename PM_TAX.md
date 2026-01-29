@@ -456,12 +456,6 @@ CREATE TABLE IF NOT EXISTS `crawlerdb`.`taxInfo` (
 ---
 
 ---
-
-## 總結
-
-這是一套 **可日批、可回補、可稽核、可懷疑** 的資料管線，
-設計重點不是「跑得快」，而是「跑錯一定會被抓到」。
-
 未來淺在優化方向：
 
 * 建立 `TaxInfo_latest` 快取表
