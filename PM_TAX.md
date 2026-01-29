@@ -264,119 +264,111 @@ python run_daily_job_v3.py >> logs\tax_daily_%DATE%.log 2>&1
 ## DDL
 ### crawlerdb.tmp_rawData
 ```sql
-CREATE TABLE IF NOT EXISTS `crawlerdb`.`tmp_rawData` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+-- crawlerdb.tmp_rawdata definition
 
-  `run_id` VARCHAR(32) NOT NULL,
-  `source_url` VARCHAR(500) NOT NULL,
-  `local_zip_path` VARCHAR(500) NOT NULL,
-  `local_csv_path` VARCHAR(500) NOT NULL,
-
-  `downloaded_at` DATETIME(6) NOT NULL,
-  `file_date` DATE NULL,
-
-  `row_num` INT NOT NULL,
-  `row_type` ENUM('HEADER','META','DATA') NOT NULL,
-
-  `c01` TEXT NULL,
-  `c02` TEXT NULL,
-  `c03` TEXT NULL,
-  `c04` TEXT NULL,
-  `c05` TEXT NULL,
-  `c06` TEXT NULL,
-  `c07` TEXT NULL,
-  `c08` TEXT NULL,
-  `c09` TEXT NULL,
-  `c10` TEXT NULL,
-  `c11` TEXT NULL,
-  `c12` TEXT NULL,
-  `c13` TEXT NULL,
-  `c14` TEXT NULL,
-  `c15` TEXT NULL,
-  `c16` TEXT NULL,
-
-  `loaded_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-
+CREATE TABLE `tmp_rawdata` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `run_id` varchar(32) NOT NULL,
+  `source_url` varchar(500) NOT NULL,
+  `local_zip_path` varchar(500) NOT NULL,
+  `local_csv_path` varchar(500) NOT NULL,
+  `downloaded_at` datetime(6) NOT NULL,
+  `file_date` date DEFAULT NULL,
+  `row_num` int NOT NULL,
+  `row_type` enum('HEADER','META','DATA') NOT NULL,
+  `c01` text,
+  `c02` text,
+  `c03` text,
+  `c04` text,
+  `c05` text,
+  `c06` text,
+  `c07` text,
+  `c08` text,
+  `c09` text,
+  `c10` text,
+  `c11` text,
+  `c12` text,
+  `c13` text,
+  `c14` text,
+  `c15` text,
+  `c16` text,
+  `loaded_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
-  KEY `idx_run_row` (`run_id`, `row_num`),
-  KEY `idx_run_type` (`run_id`, `row_type`),
-  KEY `idx_run_filedate` (`run_id`, `file_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  KEY `idx_run_row` (`run_id`,`row_num`),
+  KEY `idx_run_type` (`run_id`,`row_type`),
+  KEY `idx_run_filedate` (`run_id`,`file_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 ```
 
 ### crawlerdb.tmp_taxInfo
 ```sql
-CREATE TABLE IF NOT EXISTS `crawlerdb`.`tmp_taxInfo` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-
-  `run_id` VARCHAR(32) NOT NULL,
-  `source_file_date` DATE NOT NULL,
-  `row_num` INT NOT NULL,
-
-  `party_addr` VARCHAR(300) NULL,
-  `party_id` VARCHAR(20) NOT NULL,
-  `parent_party_id` VARCHAR(20) NULL,
-  `party_name` VARCHAR(200) NULL,
-  `paidin_capital` BIGINT NULL,
-  `setup_date` DATE NULL,
-  `party_type` VARCHAR(50) NULL,
-  `use_invoice` CHAR(1) NULL,
-
-  `ind_code` VARCHAR(20) NULL,
-  `ind_name` VARCHAR(100) NULL,
-  `ind_code1` VARCHAR(20) NULL,
-  `ind_name1` VARCHAR(100) NULL,
-  `ind_code2` VARCHAR(20) NULL,
-  `ind_name2` VARCHAR(100) NULL,
-  `ind_code3` VARCHAR(20) NULL,
-  `ind_name3` VARCHAR(100) NULL,
-
-  `row_hash` CHAR(64) NOT NULL,
-  `etl_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_run_row` (`run_id`, `row_num`),
-  KEY `idx_run_party` (`run_id`, `party_id`),
-  KEY `idx_party_hash` (`party_id`, `row_hash`),
-  KEY `idx_file_date` (`source_file_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- crawlerdb.tmp_taxinfo definition
+CREATE TABLE `tmp_taxinfo` (
+  `Party_ID` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_ci NOT NULL,
+  `Party_Addr` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `Parent_Party_ID` int DEFAULT NULL,
+  `Party_Name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `PaidIn_Capital` bigint DEFAULT NULL,
+  `Setup_Date` date DEFAULT NULL,
+  `Party_Type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Use_Invoice` char(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code` int DEFAULT NULL,
+  `Ind_Name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code1` int DEFAULT NULL,
+  `Ind_Name1` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code2` int DEFAULT NULL,
+  `Ind_Name2` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code3` int DEFAULT NULL,
+  `Ind_Name3` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Update_Time` datetime DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 ```
 
 ### crawlerdb.taxInfo
 ```sql
-CREATE TABLE IF NOT EXISTS `crawlerdb`.`taxInfo` (
-  `party_id` VARCHAR(20) NOT NULL,  -- 統一編號
-
-  `party_addr` VARCHAR(300) NULL,  -- 營業地址
-  `parent_party_id` VARCHAR(20) NULL,  -- 總機構統一編號
-  `party_name` VARCHAR(200) NULL,  -- 營業人名稱
-  `paidin_capital` BIGINT NULL,  -- 資本額
-  `setup_date` DATE NULL,  -- 設立日期
-  `party_type` VARCHAR(50) NULL,  -- 使用統一發票
-  `use_invoice` CHAR(1) NULL,  -- 行業代號
-
-  `ind_code` VARCHAR(20) NULL,  -- 行業代號
-  `ind_name` VARCHAR(100) NULL,  -- 名稱
-  `ind_code1` VARCHAR(20) NULL,  -- 行業代號1
-  `ind_name1` VARCHAR(100) NULL,  -- 名稱1
-  `ind_code2` VARCHAR(20) NULL,  -- 行業代號2
-  `ind_name2` VARCHAR(100) NULL,  -- 名稱2
-  `ind_code3` VARCHAR(20) NULL,  -- 行業代號3
-  `ind_name3` VARCHAR(100) NULL,  -- 名稱3
-
-  `row_hash` CHAR(64) NOT NULL,
-
-  `source_file_date` DATE NOT NULL,
-  `last_run_id` VARCHAR(32) NOT NULL,
-
-  `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-
-  PRIMARY KEY (`party_id`),
-  KEY `idx_source_date` (`source_file_date`),
-  KEY `idx_row_hash` (`row_hash`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- crawlerdb.taxinfo definition
+CREATE TABLE `taxinfo` (
+  `Party_ID` varchar(20) CHARACTER SET latin1 COLLATE latin1_general_ci NOT NULL,
+  `Party_Addr` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `Parent_Party_ID` int DEFAULT NULL,
+  `Party_Name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `PaidIn_Capital` bigint DEFAULT NULL,
+  `Setup_Date` date DEFAULT NULL,
+  `Party_Type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Use_Invoice` char(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code` int DEFAULT NULL,
+  `Ind_Name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code1` int DEFAULT NULL,
+  `Ind_Name1` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code2` int DEFAULT NULL,
+  `Ind_Name2` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Ind_Code3` int DEFAULT NULL,
+  `Ind_Name3` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `Update_Time` datetime DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 ```
+
+---
+##資料欄位說明
+| 欄位英文 | 欄位中文 | 資料型態 | 範例 |
+| --- | --- | --- | --- |
+| party_id | 統一編號 | 半 pipeline ETL | 正式 ETL 模組 |
+| party_addr | 營業地址 | 直接讀 CSV | **僅從 tmp_rawData 讀取** |
+| parent_party_id | 總機構統一編號 | 無 | `tmp_rawData` |
+| party_name | 營業人名稱 | 無 | `tmp_rawData` |
+| paidin_capital | 資本額 | 無 | `tmp_rawData` |
+| setup_date | 設立日期 | 無 | `tmp_rawData` |
+| party_type | 組織別名稱 | 無 | `tmp_rawData` |
+| use_invoice | 使用統一發票 | 無 | `tmp_rawData` |
+| ind_code | 行業代號 | 無 | `tmp_rawData` |
+| ind_name | 名稱 | 無 | `tmp_rawData` |
+| ind_code1 | 行業代號1 | 無 | `tmp_rawData` |
+| ind_name1 | 名稱1 | 無 | `tmp_rawData` |
+| ind_code2 | 行業代號2 | 無 | `tmp_rawData` |
+| ind_name2 |  | 名稱2 | `tmp_rawData` |
+| ind_code3 | 行業代號3 | 無 | `tmp_rawData` |
+| ind_name3 | 名稱3 | 無 | `tmp_rawData` |
+| Update_Time | 更新時間 | 無 | `tmp_rawData` |
 
 ---
 
