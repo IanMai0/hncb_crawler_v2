@@ -27,17 +27,17 @@
 ├── /logs                            # 程式運作 logs (紀錄用)
    ├── gcis_pipeline_20260119.log    # 日批 logs（記錄用）
    ├── gcis_pipeline_20260120.log    # 日批 logs（記錄用）
-   .
-   .
-   .
+      .
+      .
+      .
 ├── /work                            # 裝載_自動下載日批檔案 (紀錄用)
    ├── BGMOPEN1_20260119_151750.zip  # 直接下載日批壓縮檔
    ├── BGMOPEN1_20260119_151750.csv  # 解壓縮後日批 csv 檔案
    ├── BGMOPEN1_20260120_151750.zip  # 
    ├── BGMOPEN1_20260120_151750.csv  # 
-   .
-   .
-   .
+      .
+      .
+      .
 ├── run_daily_job_v3.py              # 日批入口（CLI / 排程用）
 ├── crawler_etl_v3.py                # 下載、raw 入庫、ETL
 ├── db_loader_v4.py                  # DB I/O 與 tmp→main merge（依 vGPT.sql）
