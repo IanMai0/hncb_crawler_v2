@@ -51,6 +51,18 @@
 ```
 
 ---
+## 來源網站查詢流程說明
+**前往目標網址：https://findbiz.nat.gov.tw/fts/query/QueryBar/queryInit.do?datatype=B**
+![商工登記查詢_前往下載全國營業稅籍資料集](https://github.com/user-attachments/assets/83df1853-2014-410d-8e63-235456012813)
+
+**點擊跳轉至網址, 並點擊下載 CSV 檔案：https://data.gov.tw/dataset/9400**
+<img width="1773" height="980" alt="image" src="https://github.com/user-attachments/assets/24f56f36-56b9-4018-8718-62d0b2cc9b09" />
+
+**下載至本機端目錄畫面**
+![稅籍下載 zip and csv file](https://github.com/user-attachments/assets/f25c85c5-bf4c-44e2-b616-bd2e4718fba3)
+
+---
+
 
 ## 整體流程說明（實際執行順序）
 
