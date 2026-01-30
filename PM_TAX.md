@@ -411,7 +411,6 @@ CREATE TABLE `taxinfo` (
 
 
 ---
-## 版本開發差異
 # crawler_etl 系列版本差異說明（v1 → v3）
 
 本文說明稅籍日批管線中的版本演進差異**，目的在於：
@@ -458,6 +457,185 @@ CREATE TABLE `taxinfo` (
 | **清理機制** | 無明確清空 | 執行前後強制清空 | 支援 `--no-cleanup` 模式 |
 
 ---
+## 重點關鍵 Function 簡介（`crawler_etl_v3.py` + `run_daily_job_v3.py`）
+以下挑的是**真正控制資料生命線**（下載/存證/ETL/驗證/日批清理/merge）的關鍵 Function
+
+## 1) `crawler_etl_v3.py`（下載/存證(raw)/ETL 到 legacy tmp）
+
+### A. `_download_file(url, dst_path, *, logger, timeout, max_retry) -> None`
+
+**定位：下載層的「抗爛網路」核心**（含 SSL fallback）
+
+* **做什麼**
+
+  * 使用 `requests` 下載 ZIP。
+  * 先嘗試 `verify=certifi.where()`（正常驗證）
+  * 若遇到鬼問題：`Missing Subject Key Identifier` → 會 retry
+  * 最後一輪會 fallback 到 `verify=False`（不驗證 SSL）讓流程能跑下去（並打 warning）
+
+* **logs 看到的行為**
+
+  * `verify=certifi` 失敗數次
+  * 最後 `verify=INSECURE(verify=False)` 成功（InsecureRequestWarning）
+
+* **風險/注意**
+
+  * `verify=False` 是「可用但不優雅」：能跑，但安全性下降（容易被中間人攻擊）。
+  * 註解：真要根治：要處理對方站台憑證鏈或改走政府/備援鏡像源（但這是另一支線任務）。
+
+---
+
+### B. `download_and_extract(work_dir: str) -> tuple[str, str, datetime]`
+
+**定位：把遠端 ZIP 變成本地「可追溯」檔案（含時間戳命名）**
+
+* **做什麼**
+
+  * 產生時間戳 `BGMOPEN1_YYYYmmdd_HHMMSS.zip/.csv`
+  * 呼叫 `_download_file()` 下載 ZIP
+  * 解壓縮，找出 zip 內的 `BGMOPEN1.csv`，搬到帶時間戳的新檔名
+* **回傳**
+
+  * `zip_path`, `csv_path`, `downloaded_at`
+
+---
+
+### C. `csv_to_tmp_rawdata(conn, run_id, *, source_url, local_zip_path, local_csv_path, downloaded_at) -> date`
+
+**定位：raw 存證層的核心（要求「raw 一律先入 DB」就在這裡落地）**
+
+* **做什麼**
+
+  * 逐行讀 CSV，把每行都寫入 **`crawlerdb.tmp_rawData`**
+  * 分類 `row_type`：
+
+    * 第 1 行：`HEADER`
+    * 第 2 行：`META`（並解析 `file_date`）
+    * 其後：`DATA`
+  * 每行固定補齊到 16 欄（`c01..c16`），避免欄數不齊炸裂
+  * 寫入 DB 使用 `insert_tmp_rawdata()`（在 loader 檔）
+
+* **回傳**
+
+  * `file_date`（從 META 第 2 行解析出來的日期）
+
+* **為什麼它重要**
+
+  * 考量後續資料工程要做「可追溯」「出事可回放」「ETL 可驗證」，沒有 raw 存證則只能憑運氣。
+
+---
+
+### D. `validate_file_date_or_raise(source_file_date: date) -> None`
+
+**定位：日批完整性守門員（防止你把昨天檔案當今天跑）**
+
+* **預設行為（嚴格）**
+
+  * 若有 `EXPECT_FILE_DATE=YYYY-MM-DD`：用它比
+  * 否則：拿 `source_file_date` 比對今天日期 `today`
+  * 不符就 `raise RuntimeError`
+
+* **可控開關**
+
+  * `STRICT_FILE_DATE=0` → 直接略過（但會 warning）
+  * `--skip-date-check`（run_daily_job v3 參數）本質上也是把嚴格檢查關掉
+
+---
+
+### E. `raw_to_legacy_tmp_etl(conn, run_id, source_file_date) -> int`
+
+**定位：把 raw(DATA) 轉成舊表 `Tmp_TaxInfo` 的 ETL 核心**
+
+* **做什麼**
+
+  1. 從 `tmp_rawData` 抓 `row_type='DATA'`
+  2. 逐列做欄位正規化/轉型（空白、全形空白、民國日期、純數字行業碼、資本額 int）
+  3. 把清洗後資料寫到 **舊表** `crawlerdb.Tmp_TaxInfo`（用 `insert_legacy_tmp_taxinfo`）
+
+* **回傳**
+
+  * 寫入 `Tmp_TaxInfo` 的筆數（clean_cnt）
+
+* **「核對」**
+
+  * `tmp_rawData(DATA)` 的筆數要等於 `Tmp_TaxInfo` 筆數
+  * 這件事是在 `run_daily_job_v3.py` 裡做最後核對 log 的
+
+---
+
+## 2) `run_daily_job_v3.py`（日批 orchestrator / CLI 入口）
+
+### A. `_parse_args() -> argparse.Namespace`
+
+**定位：CLI 行為開關總控（你要的「可針對已下載 CSV 操作」就在這裡）**
+
+支援參數：
+
+* `--work-dir`：工作目錄（下載/解壓/臨時檔）
+* `--csv`：指定本地 CSV → **跳過下載/解壓**
+* `--skip-date-check`：略過日期檢查（等同關 strict）
+* `--no-cleanup`：不清空 tmp 表（除錯用，正式日批不要開）
+
+> logs 裡 `python run_daily_job_v3.py daily ...` 報錯是正常的：目前 v3 **沒有 subcommand**（daily/from_csv），只有用 `--csv` 做模式切換。
+
+---
+
+### B. `_make_run_id(now: datetime) -> str`
+
+**定位：產生 run_id（追溯鏈的 key）**
+
+* 格式：`RUN_YYYYmmdd_HHMMSS`
+* 這個會一路寫進 `tmp_rawData.run_id`，也會出現在 log（便於追查）
+
+---
+
+### C. `main() -> None`
+
+**定位：整條 pipeline 的 orchestrator（控制流程順序、DB清理策略、核對、merge）**
+
+它做的事情，照執行順序（對應你想保留的流程）：
+
+1. **產生 run_id + log START**
+2. 若 `--skip-date-check` → 設定 `STRICT_FILE_DATE=0`
+3. **連線 MySQL**
+4. **日批前清空**
+
+   * `truncate_tmp_rawdata(conn)`
+   * `truncate_legacy_tmp_taxinfo(conn)`
+5. **資料來源分歧**
+
+   * 無 `--csv`：走 `download_and_extract(work_dir)`
+   * 有 `--csv`：直接使用該 CSV（跳過下載/解壓）
+6. **raw 入庫**
+
+   * `csv_to_tmp_rawdata(...)` → 回 `file_date`
+7. **日期檢查**
+
+   * `validate_file_date_or_raise(file_date)`
+8. **ETL 入 legacy tmp**
+
+   * `raw_to_legacy_tmp_etl(...)` → `clean_cnt`
+9. **核對 raw vs tmp**
+
+   * `count_rawdata_data_rows(run_id)` vs `count_legacy_tmp_taxinfo()`
+10. **tmp -> main 差異寫入**
+
+* `merge_diff_tmp_to_main_taxinfo(conn)`
+
+11. **TaxRecord（可停用）**
+
+* 若 `DISABLE_TAXRECORD=1`：跳過（你 logs 就是這樣）
+
+12. **日批後清空（預設會做）**
+
+* 除非 `--no-cleanup`
+
+13. log END
+
+# 核心點
+
+* `crawler_etl_v3.py` 負責：**下載/解壓 → raw 存證 → ETL 到 tmp**
+* `run_daily_job_v3.py` 負責：**日批流程編排 + CLI 模式切換 + 核對 + merge + 清理策略**
 
 ---
 未來淺在優化方向：
