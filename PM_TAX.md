@@ -258,7 +258,7 @@ python run_daily_job_v3.py >> logs\tax_daily_%DATE%.log 2>&1
 * 可追溯、可重跑、可稽核
 * 日批結束後清空(待確定)
 
-### `Tmp_TaxInfo`（舊暫存表）
+### `Tmp_TaxInfo`（日表）
 
 * ETL 後乾淨資料
 * 不含 run_id
