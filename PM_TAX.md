@@ -371,7 +371,7 @@ CREATE TABLE `taxinfo` (
 | paidin_capital | 資本額 | bigint | 5000000 |
 | setup_date | 設立日期 | date | 2020-01-06 |
 | party_type | 組織別名稱 | varchar | 其它 |
-| use_invoice | 使用統一發票 | char(1) | Y |
+| use_invoice | 使用統一發票 | char(1) | Y/N |
 | ind_code | 行業代號 | int | 471,112 |
 | ind_name | 名稱 | varchar | 直營連鎖式便利商店 |
 | ind_code1 | 行業代號1 | int | 同上 |
