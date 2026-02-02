@@ -479,7 +479,7 @@ class tradeAdmin:
                 self.exporter.add_grade([self.codesCom, "", "", 0, 0, "", now_ts()])
                 logger.info(f"[{self.codesCom}] 無實績資料：已以空值落檔")
                 return
-            # 你原本是直接 extend records，這裡保守轉成固定欄順序
+            # 原本是直接 extend records，這裡保守轉成固定欄順序
             for r in records:
                 # r 需能對應你原本 CSV 欄位的順序；若 API 結構不同，這裡做最小映射
                 # 先盡量保有統編，如果 API 有年/期等欄位，可替換下方欄位

@@ -31,7 +31,7 @@ except Exception:
     # 沒裝 python-dotenv 或不使用 .env 都 OK
     pass
 
-from db_loader_v3 import (
+from db_loader_v4 import (
     connect_mysql,
     get_logger,
     get_mysql_settings_from_env,
