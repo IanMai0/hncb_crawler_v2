@@ -1,4 +1,4 @@
-# HNCB Crawler v2 核心網爬架構總覽 (lab_crawler)
+# HNCB Crawler v2 核心網爬架構總覽
 本文件詳盡記錄了基於 `lab_crawler` 目錄的新型網爬架構，涵蓋五大業務模組、核心技術專題、資料庫 DDL 以及自動化工具箱。
 ---
 ## 核心總表
