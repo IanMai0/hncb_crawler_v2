@@ -2,17 +2,6 @@
 本文件總攬記錄了基於 `lab_crawler` 目錄的新型網爬架構，涵蓋五大業務模組、核心技術專題、資料庫 DDL 以及自動化工具箱。
 ---
 ## 核心總表
-
-| 來源模組 | 調度層 (邏輯) | 轉換層 (風險/問題) | 資料層 (狀態) | Memo |
-| :--- | :--- | :--- | :--- | :--- |
-| **稅籍** | `run_daily_job_v3.py` | `crawler_etl_v3.py` | `db_loader_v4.py` | None |
-| **國貿局** | `lab_250930v3_模組化版本.py` | `lab_250930v3_模組化版本.py` | None | None |
-| **工廠** | `lab_flow_control.py` | `lab_factory_etl_v5.py` | None | None |
-| **商工公司** | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | None | None |
-| **商工商業** | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | None | None |
-
-## 核心總表
-
 | 來源模組 | 調度層 (邏輯) | 轉換層 (風險/問題) | 資料層 (狀態) | Memo |
 | :--- | :--- | :--- | :--- | :--- |
 | [**稅籍**](#1-稅籍模組-tax) | `run_daily_job_v3.py` | `crawler_etl_v3.py` | `db_loader_v4.py` | None |
