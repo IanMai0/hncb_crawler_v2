@@ -11,6 +11,16 @@
 | **商工公司** | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | None | None |
 | **商工商業** | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | None | None |
 
+## 核心總表
+
+| 來源模組 | 調度層 (邏輯) | 轉換層 (風險/問題) | 資料層 (狀態) | Memo |
+| :--- | :--- | :--- | :--- | :--- |
+| [**稅籍**](#1-稅籍模組-tax) | `run_daily_job_v3.py` | `crawler_etl_v3.py` | `db_loader_v4.py` | None |
+| [**國貿局**](#2-國貿局模組-trade-bureau) | `lab_250930v3_模組化版本.py` | `lab_250930v3_模組化版本.py` | None | None |
+| [**工廠**](#3-工廠模組-factory) | `lab_flow_control.py` | `lab_factory_etl_v5.py` | None | None |
+| [**商工公司**](#5-gcis-商工公司模組-gcis-company) | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | None | None |
+| [**商工商業**](#4-gcis-商工商業模組-gcis-business) | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | None | None |
+
 ---
 ## 🏗️ 核心業務模組
 本架構針對不同來源設計了高度模組化的爬蟲引擎：
