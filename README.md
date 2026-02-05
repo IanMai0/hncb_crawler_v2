@@ -14,89 +14,170 @@
 ---
 ## 🏗️ 核心業務模組
 本架構針對不同來源設計了高度模組化的爬蟲引擎：
-### 1. 稅籍模組 (Tax) —— 三位一體架構
-針對財政部稅籍日檔的高頻更新需求，由三隻核心程式構成高強度的自動化流水線：
-- **調度層 (App)**: [run_daily_job_v3.py](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/優化後空間/稅籍/run_daily_job_v3.py)
-    - 作為整個模組的 **Entry Point**。
-    - 負責參數解析（日批/回補/手動指定 CSV）、流程控制、暫存表清理、以及執行 run_id 的生成與監控。
-- **轉換層 (ETL)**: [crawler_etl_v3.py](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/優化後空間/稅籍/crawler_etl_v3.py)
-    - 負責 **資料獲取與初步清洗**。
-    - 內容包含：自動偵測 URL 下載、ZIP 解壓、CSV 核心日期（META）解析與驗證、以及將「民國日期」轉為「標準西元格式」的轉換邏輯。
-- **資料層 (DB)**: [db_loader_v4.py](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/優化後空間/稅籍/db_loader_v4.py)
-    - 負責 **高度複雜的入庫邏輯**。
-    - 執行 `Raw (Audit) > Tmp (Staging) > Main (History)` 的三層流轉。
-    - 核心包含：`executemany` 批次入庫、MD5 差異雜湊比對、以及「Raw vs Tmp」筆數不一致即攔截的強制核對機制、「Tmp vs Main」比對。
-# 國貿局模組 (TradeAdmin) 代碼分析報告
-針對國貿局查詢系統之嚴格限制，採用專門開發的彈性擷取方案：
-- **核心程式**: [lab_250930v3_模組化版本.py](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/優化後空間/國貿局/lab_250930v3_模組化版本.py)
-- **HttpClient 彈性機制**: 具備自動重建 Session 功能，當偵測到連續連線失敗時會重啟連線池，繞過伺服器端的連線數封鎖。
-- **精準 Buffer 匯出**: 透過 [BucketCsvExporter](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/優化後空間/國貿局/lab_250930v3_模組化版本.py#L191) 實現定時 Flush (預設 10 分鐘) 到固定名稱 CSV (`basic_info.csv`)，優化大量 I/O 並防止斷電遺失資料。
-- **斷點保護 (Signal Handling)**: 內建 `SIGINT`/`SIGTERM` 捕捉器，確保在使用者中斷時強制將記憶體 Buffers 資料落檔。
-- **100% 稽核對帳**: 對於查無資料或 API 失敗的 ID，自動輸出「空值標記」行，確保輸出結果與輸入名單完全對等。
-#### 🚀 路線 A：AJAX 高速繞過 (主推)
-- **核心程式**: [lab_250930v3_模組化版本.py](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/優化後空間/國貿局/lab_250930v3_模組化版本.py)
-- **技術細節**: 通過逆向 XHR 協議，發現系統存在固定驗證碼漏洞 (`verifyCode: "5408"`)。
-- **執行流程**:
-    1. 獲取當前 Session 的 `verifySHidden` token。
-    2. 直接攜帶固定驗證碼 `5408` 提交 POST 請求。
-- **優勢**: 零成本、極低延遲、無辨識錯誤風險。
-#### 🧠 路線 B：GenAI + OCR 智能辨識 (備援)
-- **技術細節**: 下載 `popCaptcha.action` 驗證碼圖片，並利用 **OpenAI GPT-4o Vision** 進行視覺分析。
-- **應用場景**: 當 AJAX 固定值繞過法失效或遇到複雜人機驗證時切換。
-- **HttpClient 彈性機制**: 具備自動重建 Session 功能，當偵測到連續連線失敗時會重啟連線池。
-- **精準 Buffer 匯出**: 透過 [BucketCsvExporter](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/優化後空間/國貿局/lab_250930v3_模組化版本.py#L191) 實現定時 Flush。
-
-# 工廠模組 (Factory Module) 代碼分析報告
-## 1. 概覽
-本報告針對位於 `舊版code/factory` 目錄下的兩個核心檔案進行深度分析：
-1.  **[lab_factory_etl_v5.py](cci:7://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:0:0-0:0)**: 核心資料處理 ETL (Extract, Transform, Load) 邏輯。
-2.  **[lab_flow_control.py](cci:7://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_flow_control.py:0:0-0:0)**: 流程控制與自動化下載腳本。
-## 2. 代碼分析細節
-### 2.1 [lab_factory_etl_v5.py](cci:7://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:0:0-0:0) (ETL 核心)
-此模組採用 **物件導向 (OOP)** 設計，將資料處理流程拆解為五個主要類別，職責劃分清晰。
-| 類別 (Class) | 職責 (Responsibility) | 關鍵邏輯與特點 | 潛在問題與改進建議 |
-| :--- | :--- | :--- | :--- |
-| **[DataPreprocessor](cci:2://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:46:0-134:17)** | **預處理**<br>- 讀取 CSV<br>- 欄位正規化<br>- 資料拆分<br>- 日期轉換 | - **全形轉半形**: 使用 `chr(ord(c) - 0xFEE0)` 轉換邏輯。<br>- **年月轉換**: [convert_roc_to_ad](cci:1://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:56:4-68:27) 處理民國轉西元 (1140625 -> 2025-06-25)。<br>- **欄位拆分**: 將「產業類別/主要產品」拆解為代碼與名稱。 | - **日期驗證**: 目前僅檢查長度 `\d{7,8}`，建議加入更嚴謹的日期合法性檢查 (如月份不可 > 12)。<br>- **欄位硬編碼**: 依賴 `COLUMN_CODE_MAP` 全域變數。 |
-| **[DataCleaner](cci:2://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:137:0-173:22)** | **清洗**<br>- HTML 解碼<br>- 空白處理<br>- 標點處理<br>- 難字處理 | - **PUA 處理**: 對 Unicode PUA 區段 (`0xE000-0xF8FF`) 進行過濾，這是處理政府資料的關鍵邏輯。<br>- **Unicode Normalize**: 使用 `NFC` 正規化。 | - **效能**: `apply` 若資料量大可能較慢，可考慮向量化操作。<br>- **特殊欄位**: 對「工廠名稱」等欄位保留標點，邏輯正確。 |
-| **[DataAnomalyReporter](cci:2://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:176:0-263:22)** | **異常檢測**<br>- 規則標記<br>- 異常統計 | - **規則引擎**: 定義了詳細的 regex 規則 (如統一編號重複檢查、長度檢查)。<br>- **異常代碼**: 使用 `E01`-`E11` 標準化錯誤代碼。 | - **規則維護性**: 規則寫死在 [__init__](cci:1://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/gcis.py:240:4-245:27) 中，建議抽離至設定檔 (Config/YAML)。<br>- **記憶體**: `value_counts()` 在大數據量下的記憶體消耗需注意。 |
-| **[StatisticalSummaryEngine](cci:2://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:266:0-324:54)** | **統計**<br>- 文字分佈<br>- Top 100 分析 | - **特定報表**: 包含「前100大工廠持有者」的客製化報表邏輯。 | - **耦合性**: 包含特定業務邏輯 (Top 100)，與通用統計功能混雜。 |
-| **[Output](cci:2://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:326:0-356:12)** | **輸出**<br>- CSV 匯出<br>- DB 介面(空) | - **欄位排序**: 強制按照指定順序輸出。<br>- **DB 缺口**: [output_data_to_DB](cci:1://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:355:4-356:12) 目前為 `pass`，尚未實作。 | - **DB 整合**: **這是與 Tax/TradeAdmin 模組最大的差距，缺乏自動入庫機制。** |
-### 2.2 [lab_flow_control.py](cci:7://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_flow_control.py:0:0-0:0) (流程控制)
-此腳本負責協調下載與 ETL 流程，但結構較為鬆散，偏向單次執行的 Script。
-| 功能區塊 | 現況描述 | 問題與風險 |
+## 1. 稅籍模組 (Tax)
+### 主要目錄
+`hncb_crawler\自動化網爬架構\lab_crawler\優化後空間\稅籍`
+### 主要程式分析
+| 程式名稱 | 角色 | 重點描述 |
 | :--- | :--- | :--- |
-| **環境設定** | 使用 `sys.path.append` 加入絕對路徑 (`C:/Users/wits/...`) | **高風險**: 路徑寫死 (Hardcoded)，無法在不同開發者或環境間移植。需改為相對路徑或模組化引用。 |
-| **下載模組** | `download_and_extract_zip`: 下載 > 檢查 ZIP > 解壓 > 重命名(時間戳) | **URL 寫死**: 工廠資料 URL 直接寫在 `main` 區塊，一旦網址變更需修 code。<br>**缺乏 Retry**: 雖然有檢查 status code，但缺乏像 `HttpClient` 的 robust retry 機制。 |
-| **流程編排** | 巢狀 `try-except` 結構 (Pyramid of Doom) | **可讀性差**: 每一層都為了 log 而包一層 try-except，造成代碼過度縮排。建議改用 Decorator 或統一的 Error Handler。 |
-| **自動化判斷** | `AutomaticAbnormalJudgment`: 包含 API/Crawler/URL 檢查介面 | **未完成**: 內含 "待雲端與 DB Setup Complete" 註解，目前僅為空殼或 Placeholder。 |
-## 3. 與現有架構 (Tax/TradeAdmin) 的差異
-| 比較項目 | 工廠模組 (舊版) | 稅籍/國貿局模組 (新版) | 建議修正方向 |
-| :--- | :--- | :--- | :--- |
-| **資料庫 (DB)** | **無** (僅輸出 CSV) | **完整** (Raw -> Tmp -> Main 三層架構) | 實作 `output_data_to_DB`，對接 `crawlerdb`。 |
-| **配置 (Config)** | 寫死在代碼中 (URL, Path) | 環境變數 (.env) / 參數化 | 抽離 URL、路徑至配置檔或 CLI 參數。 |
-| **網路層** | 簡易 `requests` | 封裝的 `HttpClient` (Retry, Session) | 整合共用的網路基礎建設。 |
-| **錯誤處理** | 巢狀 Try-Except | 裝飾器 / 全域異常處理 | 重構流程控制，扁平化代碼。 |
-| **模組引用** | 絕對路徑 `sys.path` | 相對引入 / Package | 移除 `sys.path.append` 硬路徑。 |
-## 4. 重構建議 (Refactoring Roadmap)
-1.  **路徑與環境變數修正**:
-    *   移除 `C:/Users/wits/...` 絕對路徑。
-    *   將 `ZIP_URL` 與輸出路徑改為可配置參數。
-2.  **DB 入庫實作**:
-    *   參考稅籍模組，實作 `tmp_rawdata` -> `tmp_factory` -> `main_factory` 的入庫流程。
-    *   在 `Output` 類別中完成 `output_data_to_DB`。
-3.  **流程控制優化**:
-    *   使用 `argparse` 支援 CLI 參數 (如指定日期、指定檔案)。
-    *   扁平化 `try-except` 結構。
-4.  **共用組件整合**:
-    *   確認是否可共用 `factory_etl.py` 中的 `DataCleaner` 邏輯 (目前邏輯似乎高度相似但各自維護)。
-## 5. 結論
-`lab_factory_etl_v5.py` 的 ETL 邏輯本身相對完整且結構清晰（除了 DB 部分），但 `lab_flow_control.py` 作為進入點則過於依賴本地環境且流程控制原始。首要任務是**移除絕對路徑依賴**並**打通 DB 入庫**環節。
-### 4. 商工公司/商業模組 (GCIS)
-深入擷取經濟部商工登記資料，區分公司與商業兩套系統。
-- **原始碼**: [gcis.py](file:///C:/Users/wits/PycharmProjects/hncb_crawler/自動化網爬架構/lab_crawler/gcis.py)
-- **主要功能**:
-    - `fetch_info_c()` / `fetch_directors_c()`: 公司基本資料與董監事明細。
-    - `fetch_agency_b()` / `fetch_info_b()`: 商業登記應用一/三資料。
+| **`run_daily_job_v3.py`** | **調度層** | 負責日批流程控制，包含 CLI 參數解析、日誌管理、以及協調下載、ETL 與入庫的順序。 |
+| **`crawler_etl_v3.py`** | **轉換層** | 處理 ZIP 下載、解壓縮、CSV 讀取，以及將原始資料轉換為標準格式 (ETL)。 |
+| **`db_loader_v4.py`** | **資料層** | 專責資料庫操作，包含 Raw Data 寫入、Tmp 表清除、以及核心的 **差異比對 (Merge)** 邏輯。 |
+### 三層架構拆解
+#### 1. 調度層 (Orchestration)
+*   **Source**: `run_daily_job_v3.py`
+*   **核心功能**:
+    *   **CLI 介面**: 支援 `--csv` (跳過下載)、`--no-cleanup` (保留暫存表) 等參數。
+    *   **流程控制**: `Truncate` (清暫存) -> `Download` (下載) -> `Load Raw` (入庫) -> `ETL` (轉換) -> `Merge` (寫入主表)。
+    *   **交易管理**: 確保每一階段成功才進入下一階段，失敗則回滾或報錯。
+#### 2. 轉換層 (Transformation)
+*   **Source**: `crawler_etl_v3.py`
+*   **核心功能**:
+    *   `download_and_extract()`: 處理 `BGMOPEN1.zip` 下載與解壓。
+    *   `csv_to_tmp_rawdata()`: 讀取 CSV 並解析 META 行日期，原封不動寫入 `tmp_rawData`。
+    *   `rawdata_to_legacy_tmp_taxinfo()`: 清洗資料（全形轉半形、日期正規化），轉入 `Tmp_TaxInfo`。
+#### 3. 資料層 (Data Layer)
+*   **Source**: `db_loader_v4.py`
+*   **核心功能**:
+    *   `insert_tmp_rawdata()`: 批量寫入原始資料。
+    *   `merge_diff_tmp_to_main_taxinfo()`: **關鍵邏輯**。使用 SQL Window Function 取出最新版，並透過 MD5 Hash 比對 `Tmp` 與 `Main` 表，僅寫入異動或新增資料 (Append-only)。
+### MEMO
+*   此模組為專案的 **最新完整三層架構**。
+### 未來優化建議
+1.  **MD5 效能**: 目前 MD5 計算在 SQL 端執行，若 DB 負載過重，可移至 Python 端 `crawler_etl_v3` 計算 Hash 後再入庫。
+2.  **數據異常狀況處理：**
+---
+## 2. 國貿局模組 (Trade Bureau)
+### 主要目錄
+`hncb_crawler\自動化網爬架構\lab_crawler\優化後空間\國貿局`
+### 主要程式
+| 程式名稱 | 角色 | 重點描述 |
+| :--- | :--- | :--- |
+| **`lab_250930v3_模組化版本.py`** | **混合** | 同時包含調度迴圈、爬蟲邏輯 (AJAX 繞過)、與 CSV 匯出邏輯。 |
+| *(缺資料層)* | - | 目前使用內嵌的 `BucketCsvExporter` 寫檔案，未對接 DB。 |
+### 三層架構拆解 (Source: `lab_250930v3_模組化版本.py`)
+#### 1. 調度層 (Orchestration)
+*   **Source**: `main()` 函式與 `toolbox` 類別
+*   **核心功能**:
+    *   `load_target_ids()`: 讀取目標統編清單。
+    *   `main()`: 執行主迴圈，控制批次大小 (Batch Size) 與進度 Log。
+    *   `hist_done` / `sess_done`: 維護已完成名單，支援斷點續跑。
+#### 2. 轉換層 (Transformation)
+*   **Source**: `tradeAdmin` 類別
+*   **核心功能**:
+    *   `initialize()`: 取得 `verifySHidden` Token，繞過簡易驗證。
+    *   `get_basicData()` / `get_gradeData()`: 解析 JSON 回傳值，處理空值 (`_safe_str`)。
+    *   `normalize_band()`: 將實績級距代碼 (A, B, C...) 轉換為可讀的數值範圍 (>=10, >=9,<10)。
+#### 3. 資料層 (Data Layer)
+*   **Source**: `BucketCsvExporter` 類別
+*   **核心功能**:
+    *   `add_basic()` / `add_grade()`: 將資料暫存於 List Buffer。
+    *   `flush()` / `export_if_due()`: 定時或定量將 Buffer 寫入 CSV 檔案。
+    *   **缺口**: 無 SQL 寫入邏輯。
+### MEMO
+*   `HttpClient` 封裝得宜，具備 Session 重建 (`rebuild`) 與 Retry 機制，網路層穩定。
+*   採用 AJAX 接口直接獲取 JSON，避開了傳統 HTML 解析的複雜度。
+*   除了 AJAX 開發路線以外, 另有一條路線走 OCR + GenAI 解圖形驗證碼 > 執行網爬。
+### 未來優化建議
+1.  **新增 DB Loader**: 參考稅籍模組，建立 `db_loader_trade.py`，將 `BucketCsvExporter` 替換為資料庫寫入器。
+2.  **參數化配置**: 目前輸入/輸出路徑寫死在 `main`，應改用 `argparse` 傳入。
+---
+## 3. 工廠模組 (Factory)
+### 主要目錄
+`hncb_crawler\自動化網爬架構\lab_crawler\舊版code\factory`
+### 主要程式分析
+| 程式名稱 | 角色 | 重點描述 |
+| :--- | :--- | :--- |
+| **`lab_flow_control.py`** | **調度層** | 控制下載與執行流程，但結構較原始（巢狀 Try-Except）。 |
+| **`lab_factory_etl_v5.py`** | **轉換層** | 包含完整的資料清洗與正規化邏輯，採 OOP 設計。 |
+| *(缺資料層)* | - | `Output` 類別中的 `output_data_to_DB` 方法為空實作。 |
+### 三層架構拆解
+#### 1. 調度層 (Orchestration)
+*   **Source**: `lab_flow_control.py`
+*   **核心功能**:
+    *   `download_and_extract_zip()`: 下載檔案（缺乏 Retry 機制）。
+    *   **流程控制**: 使用多層巢狀 `try...except` 進行錯誤捕捉，可讀性與維護性較差。
+    *   **路徑硬編碼**: 包含 `C:/Users/wits/...` 絕對路徑。
+#### 2. 轉換層 (Transformation)
+*   **Source**: `lab_factory_etl_v5.py`
+*   **核心功能**:
+    *   `DataPreprocessor`: 處理日期轉換 (ROC -> AD)、全形轉半形。
+    *   `DataCleaner`: 過濾 PUA 特殊字元（政府資料常見問題）、HTML Unescape。
+    *   `DataAnomalyReporter`: 根據規則標記異常資料 (E01~E11)。
+#### 3. 資料層 (Data Layer)
+*   **Source**: `lab_factory_etl_v5.py` -> `Output` 類別
+*   **核心功能**:
+    *   `output_data_to_csv()`: 寫入 CSV。
+    *   `output_data_to_DB()`: **未實作 (pass)**。
+### MEMO
+*   ETL 邏輯（轉換層）為當前較為完整的部分，OOP 結構清晰，特別針對 PUA 字元進行細膩處理。
+*   調度層與資料層則是主要弱點，暫時缺少呼叫的調度層與資料寫入層。
+### 未來優化建議
+1.  **重寫開發調度層**: 廢棄 `lab_flow_control.py`，改用類似 `run_daily_job` 的標準架構。
+2.  **實作 DB 入庫 資料層**: 補完 `output_data_to_DB`，對接 `crawlerdb`。
+3.  **移除絕對路徑**: 將路徑改為相對路徑或配置檔讀取。
+---
+## 4. GCIS 商工商業模組 (GCIS Business)
+### 主要目錄
+`hncb_crawler\自動化網爬架構\lab_crawler\優化後空間\GCIS`
+### 主要程式分析
+| 程式名稱 | 角色 | 重點描述 |
+| :--- | :--- | :--- |
+| **`lab_批次處裡_單元測試版本_251007.py`** | **混合** | 單一大檔 (Monolithic)。包含 AWS IP 切換、API 爬蟲、ETL 與檔案寫入。 |
+| *(缺資料層)* | - | 依賴 `_upsert_row` 直接對 CSV 進行讀寫操作。 |
+### 三層架構拆解 (Source: `lab_..._251007.py`)
+#### 1. 調度層 (Orchestration)
+*   **Source**: `run_crawler_business_info` / `run_crawler_business_items` / `SwitchIP`
+*   **核心功能**:
+    *   `SwitchIP`: 負責監控 AWS EC2 IP 狀態並執行 EIP 切換。
+    *   `run_crawler_*`: 讀取目標 CSV，迭代統編，控制錯誤次數 (`max_error`)。
+#### 2. 轉換層 (Transformation)
+*   **Source**: `ETl` 類別 -> `crawler_business_*`
+*   **核心功能**:
+    *   `crawler_business_info()`: 呼叫 API 取得商業基本資料 (應用一/三)。
+    *   `parse_business_items()`: **特色邏輯**。解析中文營業項目代碼（如「一0、」「十一、」），拆解為代碼與名稱清單。
+    *   `strQ2B()`: 全形轉半形工具。
+#### 3. 資料層 (Data Layer)
+*   **Source**: `ETl._upsert_row`
+*   **核心功能**:
+    *   **CSV Upsert**: 每次寫入前讀取整個 CSV -> 檢查統編是否存在 -> Update/Append -> 寫回 CSV。
+    *   **效能瓶頸**: 此方式在資料量大時 I/O 成本極高，且無並發安全性。
+### MEMO
+*   營業項目的解析邏輯 (`parse_business_items`) 非常實用，解決了中文混雜數字的拆解難題。
+*   `_upsert_row` 是最大的效能致命傷。
+### 未來優化建議
+1.  **廢除 CSV Upsert**: 改用 `tmp_table` 批量寫入 + SQL Merge 模式。
+2.  **拆分模組**: 將 `SwitchIP` 獨立為 `lib.aws`，`GcisClient` 獨立為 `lib.network`。
+---
+## 5. GCIS 商工公司模組 (GCIS Company)
+### 主要目錄
+`hncb_crawler\自動化網爬架構\lab_crawler\優化後空間\GCIS`
+### 主要程式分析
+同上，與商業模組共用同一支 `lab_批次處裡_單元測試版本_251007.py`。
+### 三層架構拆解
+#### 1. 調度層 (Orchestration)
+*   **Source**: `run_crawler_company_info`
+*   **核心功能**:
+    *   與商業模組類似，但讀取的是公司專用的目標清單。
+    *   `export_pending_ids()`: 比對 output 與 input，輸出未完成名單。
+#### 2. 轉換層 (Transformation)
+*   **Source**: `ETl.crawler_company_info`
+*   **核心功能**:
+    *   `fetch_info_c()`: 呼叫公司 API。
+    *   **狀態判斷**: 判斷回傳是否為空，或欄位缺失過多 (`sum(無資料) >= 7`)，標記為「疑似商號」或「統編錯誤」。
+    *   **欄位映射**: 將 API 的英文欄位 (e.g., `Company_Setup_Date`) 映射為中文欄位 (`核准設立日期`)。
+#### 3. 資料層 (Data Layer)
+*   **Source**: `ETl._upsert_row` (共用)
+*   **核心功能**:
+    *   同商業模組，依賴低效的 CSV 讀寫更新。
+### MEMO
+*   公司與商業模組混在一起，導致代碼龐大可能較為難以維護。
+*   對於「無資料」或「異常」的判斷邏輯（如 `state` 標記）暫時寫死在爬蟲流程中。
+### 未來優化建議
+1.  **邏輯分離**: 將公司 (`Company`) 與商業 (`Business`) 的 ETL 類別拆開，因為兩者的欄位定義完全不同。
+2.  **新型態架構開發**：調度層 > 轉換層 > 資料層。
+3.  **相關耦合性議題處理**：
+4.  **異常處理標準化**: 將「疑似商號」、「無資料」等狀態碼標準化，並記錄到 DB 的狀態欄位，而非混在資料欄位中。
 ---
 ## 🏗️ 爬蟲框架與系統架構
 採用「前後端解耦」與「模組化 Client」設計，確保核心擷取邏輯與業務流控制分離。
