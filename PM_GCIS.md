@@ -127,6 +127,7 @@ CREATE TABLE `GcisCompany` (
 ### 3. Tmp_GcisBusiness / GcisBusiness (商業資料)
 結構相同，Tmp 為暫存，Main 為歷史主表。
 
+```sql
 CREATE TABLE `GcisBusiness` (
   `Party_ID` varchar(20) NOT NULL COMMENT '統一編號',
   `Business_Name` varchar(200),
@@ -139,4 +140,29 @@ CREATE TABLE `GcisBusiness` (
   `Update_Time` datetime DEFAULT CURRENT_TIMESTAMP,
   KEY `idx_party` (`Party_ID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+---
+## 版本演進說明
+
+### v1 (Current - Monolithic)
+*   **程式**: `lab_批次處裡_單元測試版本_251007.py`
+*   **特點**: 
+    *   單一腳本完成 Crawl, ETL, IO。
+    *   使用 CSV 進行 Upsert (File-based DB)，效能隨資料量下降。
+    *   AWS IP 切換與業務邏輯高度耦合。
+
+### v2 (Target - Modular & DB-centric)
+*   **程式**: `run_gcis_daily.py` + `gcis_etl.py` + `db_loader_gcis.py`
+*   **改進**:
+    *   **DB Base**: 廢除 CSV Upsert，全面改用 MySQL。
+    *   **Raw-first**: 增加 Raw Table 存證，確保資料可追溯。
+    *   **Decoupled**: 爬蟲 (Client) 與儲存 (Loader) 分離，IP Rotation 模組獨立。
+
+---
+
+## 注意事項
+1.  **IP Rotation**: GCIS API 對 IP 封鎖頻率極高，[SwitchIP](cci:2://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E5%84%AA%E5%8C%96%E5%BE%8C%E7%A9%BA%E9%96%93/GCIS/lab_%E6%89%B9%E6%AC%A1%E8%99%95%E8%A3%A1_%E5%96%AE%E5%85%83%E6%B8%AC%E8%A9%A6%E7%89%88%E6%9C%AC_251007.py:77:0-294:23) 模組需確保穩定性，並與 Retry 機制深度整合。
+2.  **資料一致性**: 商業與公司 API 可能回傳不同結構的資料，ETL 層需做好防禦性程式設計 (Defensive Programming)。
+3.  **營業項目**: 商業登記的營業項目常包含中文描述（如「一、...」），需保留 v1 的解析邏輯 (`parse_business_items`)。
+
 
