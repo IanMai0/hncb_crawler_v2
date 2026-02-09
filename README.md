@@ -10,7 +10,7 @@
 | [**國貿局**](#2-國貿局模組-trade-bureau) | 手動 | 上線 | `lab_250930v3_模組化版本.py` | `lab_250930v3_模組化版本.py` | `None` | - |
 | [**工廠**](#3-工廠模組-factory) | 月批 | 上線 | `lab_flow_control.py` | `lab_factory_etl_v5.py` | `None` | - |
 | [**商工**](#gcis-商工) | 手動 | 未上線 | `gcis_snapshot_main.py` | `None` | `None` | 商工畫面快照功能 |
-| [**商工**](#gcis-商工) | 手動 | 未上線 | `tax_daily_v3_純GCIS.py` | `None` | `None` | - |
+|                       | 手動 | 未上線 | `tax_daily_v3_純GCIS.py` | `None` | `None` | - |
 | [**商工公司**](#5-gcis-商工公司模組-gcis-company) | 手動 | 上線 | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | `None` | - |
 | [**商工商業**](#4-gcis-商工商業模組-gcis-business) | 手動 | 上線 | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | `None` | - |
 
