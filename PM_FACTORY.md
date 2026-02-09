@@ -1,4 +1,4 @@
-# 工廠模組 (Factory Module) 代碼分析報告
+# 工廠模組 (Factory Module) 代碼報告
 ## 1. 概覽
 本報告針對位於 `舊版code/factory` 目錄下的兩個核心檔案進行深度分析：
 1.  **[lab_factory_etl_v5.py](cci:7://file:///C:/Users/wits/PycharmProjects/hncb_crawler/%E8%87%AA%E5%8B%95%E5%8C%96%E7%B6%B2%E7%88%AC%E6%9E%B6%E6%A7%8B/lab_crawler/%E8%88%8A%E7%89%88code/factory/lab_factory_etl_v5.py:0:0-0:0)**: 核心資料處理 ETL (Extract, Transform, Load) 邏輯。
