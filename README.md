@@ -14,6 +14,20 @@
 | [**商工公司**](#5-gcis-商工公司模組-gcis-company) | 手動 | 上線 | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | `None` | - |
 | [**商工商業**](#4-gcis-商工商業模組-gcis-business) | 手動 | 上線 | `lab_批次處裡_單元測試版本_251007.py` | `lab_批次處裡_單元測試版本_251007.py` | `None` | - |
 
+## 核心資料源總表
+| 模組名稱 | 資源連結 (URL) | 備註說明 (Memo) |
+| :--- | :--- | :--- |
+| **稅籍模組** | [點擊跳轉](#) | 包含每日稅籍資料 |
+| **國貿局模組** | [點擊跳轉](#) | - |
+| **工廠模組** | [點擊跳轉](#) | 包含每月工廠資料 |
+| **商工公司模組** | [點擊跳轉](#https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) | - |
+| **商工商業模組** | [點擊跳轉](#https://data.gcis.nat.gov.tw/od/data/api/7E6AFA72-AD6A-46D3-8681-ED77951D912D?$format=json&$filter=President_No eq 15725713 and Agency eq 376610000A&$skip=0&$top=50) | - |
+
+---
+
+> **📌 提示：** > - 點擊 **URL** 欄位中的連結可快速跳轉至對應的文件夾或 API 端點。
+> - 若有任何欄位變動，請更新 **Memo** 內的版本號。
+
 ## 📋 模組資源導覽表
 
 | 模組名稱 | 資源連結 (URL) | 備註說明 (Memo) |
