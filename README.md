@@ -22,7 +22,8 @@
 | **工廠模組** | https://serv.gcis.nat.gov.tw/RDownLoad/Data/statistical/%E7%94%9F%E7%94%A2%E4%B8%AD%E5%B7%A5%E5%BB%A0%E6%B8%85%E5%86%8A.zip | 包含每月工廠資料 |
 | **商工公司模組** | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) | - |
 | **商工商業模組** | https://data.gcis.nat.gov.tw/od/data/api/7E6AFA72-AD6A-46D3-8681-ED77951D912D?$format=json&$filter=President_No eq 15725713 and Agency eq 376610000A&$skip=0&$top=50) | - |
-
+| **優良拒往** | pcc.gov.tw | - |
+| **動產擔保交易公示登記清冊** | https://data.gcis.nat.gov.tw/od/detail?oid=07C2AB4A-4A73-402C-B8EE-2D04A56FA75E#moreBtn | - |
 ---
 
 > **📌 提示：** > - 點擊 **URL** 欄位中的連結可快速跳轉至對應的文件夾或 API 端點。
