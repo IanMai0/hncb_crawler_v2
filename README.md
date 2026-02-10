@@ -17,11 +17,11 @@
 ## 核心資料源總表
 | 模組名稱 | 資源連結 (URL) | 備註說明 (Memo) |
 | :--- | :--- | :--- |
-| **稅籍模組** | [點擊跳轉](#) | 包含每日稅籍資料 |
-| **國貿局模組** | [點擊跳轉](#) | - |
-| **工廠模組** | [點擊跳轉](#) | 包含每月工廠資料 |
-| **商工公司模組** | [點擊跳轉](#https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) | - |
-| **商工商業模組** | [點擊跳轉](#https://data.gcis.nat.gov.tw/od/data/api/7E6AFA72-AD6A-46D3-8681-ED77951D912D?$format=json&$filter=President_No eq 15725713 and Agency eq 376610000A&$skip=0&$top=50) | - |
+| **稅籍模組** | https://eip.fia.gov.tw/data/BGMOPEN1.csv | 包含每日稅籍資料 |
+| **國貿局模組** | https://fbfh.trade.gov.tw/fb/web/queryBasicf.do | - |
+| **工廠模組** | https://serv.gcis.nat.gov.tw/RDownLoad/Data/statistical/%E7%94%9F%E7%94%A2%E4%B8%AD%E5%B7%A5%E5%BB%A0%E6%B8%85%E5%86%8A.zip | 包含每月工廠資料 |
+| **商工公司模組** | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) | - |
+| **商工商業模組** | https://data.gcis.nat.gov.tw/od/data/api/7E6AFA72-AD6A-46D3-8681-ED77951D912D?$format=json&$filter=President_No eq 15725713 and Agency eq 376610000A&$skip=0&$top=50) | - |
 
 ---
 
