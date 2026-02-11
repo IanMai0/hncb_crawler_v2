@@ -9,6 +9,19 @@
 *   **Incremental Merge**：主表採用 Append-only 策略，僅寫入異動與新增資料。
 
 ---
+## 核心資料源總表
+| 模組名稱 | MEMO | 資源連結 (URL) |
+| :--- | :--- | :--- |
+| **商工公司模組-應用一** | 登記基本資料 | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) |
+| **商工公司模組-應用二** | 董監持股資料 | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) |
+| **商工公司模組-應用三** | 營業項目資料 | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) |
+| **商工公司模組-應用一** | 登記基本資料 | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) |
+| **商工公司模組-應用二** | 董監持股資料 | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) |
+| **商工公司模組-應用三** | 營業項目資料 | https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6?$format={format}&$filter=Business_Accounting_NO eq {Business_Accounting_NO}&$skip={skip}&$top={top}) |
+
+---
+
+---
 
 ## 專案結構 (Target)
 ```
