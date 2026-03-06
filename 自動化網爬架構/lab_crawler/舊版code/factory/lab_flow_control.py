@@ -36,45 +36,61 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 自動下載目標數據_工廠（內建連線檢查）
-def download_and_extract_zip(url: str, extract_to: str = ".") -> None:
+def download_and_extract_zip(url: str, extract_to: str = ".") -> str:
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    zip_filename = f"{ts}"
-    zip_path = os.path.join(extract_to, zip_filename)
+    # 注意：原本代碼中 zip_path 缺少副檔名，建議補上 .zip
+    zip_path = os.path.join(extract_to, f"{ts}.zip")
 
     # 檢查資料源網址是否有效
     try:
-        head_resp = requests.head(url, timeout=5, allow_redirects=True)
+        # 💡 增加 verify=False 跳過 SSL 驗證 (會跳出 Warning，但可抓到資料)
+        # 如果要關閉 Warning 視窗，可加入 requests.packages.urllib3.disable_warnings()
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        head_resp = requests.head(url, timeout=10, allow_redirects=True, verify=False)
         if head_resp.status_code != 200:
             logger.error(f"❌ 下載中止：URL 無效，狀態碼 {head_resp.status_code}")
-            return
+            return None
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ 下載中止：URL 無法連線 - {type(e).__name__} - {str(e)}")
-        return
+        return None
 
-    logger.info(f"開始下載：工廠數據(月)作業\n{url}\n→\n{zip_path}")
-    resp = requests.get(url, stream=True)
-    resp.raise_for_status()
+    logger.info(f"開始下載：工廠數據(月)作業\n{url}")
 
-    with open(zip_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-    logger.info(f"下載完成：{zip_path}")
+    try:
+        # 💡 下載時同樣加上 verify=False
+        resp = requests.get(url, stream=True, verify=False)
+        resp.raise_for_status()
 
-    with zipfile.ZipFile(zip_path, 'r') as z:
-        members = z.namelist()
-        logger.info(f"ZIP 內容：{members}")
-        for member in members:
-            extracted_path = z.extract(member, path=extract_to)
-            dir_, fname = os.path.split(extracted_path)
-            new_name = f"{ts}_{fname}"
-            new_path = os.path.join(dir_, new_name)
-            os.replace(extracted_path, new_path)
-            logger.info(f"解壓並重命名：{member} → {new_name}")
+        with open(zip_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        logger.info(f"下載完成：{zip_path}")
 
-    logger.info("✅ 全部下載, 解壓與重命名完成。")
+        new_name = None
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            members = z.namelist()
+            logger.info(f"ZIP 內容：{members}")
+            for member in members:
+                extracted_path = z.extract(member, path=extract_to)
+                dir_, fname = os.path.split(extracted_path)
+                new_name = f"{ts}_{fname}"
+                new_path = os.path.join(dir_, new_name)
+                # 處理 Windows 檔案佔用或路徑問題
+                if os.path.exists(new_path):
+                    os.remove(new_path)
+                os.rename(extracted_path, new_path)
+                logger.info(f"解壓並重命名：{member} → {new_name}")
 
-    return new_name  # 回傳下載目標數據檔名, 供給下個 Class 資料剖析器 ETL
+        # 移除暫存的 zip 檔
+        os.remove(zip_path)
+        return new_name  # 回傳最後一個解壓的檔名
+
+    except Exception as e:
+        logger.error(f"❌ 處理檔案時發生錯誤: {e}")
+        return None
 
 # 自動下載異常判斷：url, api, 網爬 (待雲端與 DB Setup Complete, 才繼續開發)
 class AutomaticAbnormalJudgment:
@@ -120,36 +136,41 @@ if __name__ == "__main__":
             # # 1.1 下載 / 解壓 / 回傳檔名
             TargetFileName = download_and_extract_zip(ZIP_URL, extract_to=staging_dir)
             # TargetFileName = "20250822_104820_11404.csv"  # 手動用
-            try:
-                # 2. 資料預處裡
-                preprocessor = DataPreprocessor()
-                df = preprocessor.preprocess(csv_path=rf"./data/{TargetFileName}")
-                # df = preprocessor.preprocess(csv_path=rf"./data/20250822_104820_11404.csv")  # 手動用
-                logger.info(f"資料預處理 完成")
+
+            # 💡 關鍵檢查：如果下載失敗，就不要進去執行 ETL
+            if TargetFileName is None:
+                logger.error("🛑 下載失敗，無法繼續執行 ETL 流程。")
+            else:
                 try:
-                    # 2.1 資料清洗與異常處裡
-                    df_after = DataCleaner(df).convert_and_handle_errors()
-                    df_after = DataAnomalyReporter(df_after).execute()
-                    logger.info(f"資料清洗與異常處理 完成")
+                    # 2. 資料預處裡
+                    preprocessor = DataPreprocessor()
+                    df = preprocessor.preprocess(csv_path=rf"./data/{TargetFileName}")
+                    # df = preprocessor.preprocess(csv_path=rf"./data/20250822_104820_11404.csv")  # 手動用
+                    logger.info(f"資料預處理 完成")
                     try:
-                        # 2.2 敘述性統計
-                        print("\n" + "=" * 40 + "\n")
-                        StatisticalSummaryEngine(df_after).execute()  # 執行敘述性統計
-                        time.sleep(1)
-                        logger.info(f"資料敘述性統計 完成")
+                        # 2.1 資料清洗與異常處裡
+                        df_after = DataCleaner(df).convert_and_handle_errors()
+                        df_after = DataAnomalyReporter(df_after).execute()
+                        logger.info(f"資料清洗與異常處理 完成")
                         try:
-                            # 2.3 匯出整理後資料成 CSV
-                            output = Output(df=df_after, TargetFileName=TargetFileName)
-                            output.output_data_to_csv()
-                            logger.info(f"匯出整理後資料成 CSV 完成")
+                            # 2.2 敘述性統計
+                            print("\n" + "=" * 40 + "\n")
+                            StatisticalSummaryEngine(df_after).execute()  # 執行敘述性統計
+                            time.sleep(1)
+                            logger.info(f"資料敘述性統計 完成")
+                            try:
+                                # 2.3 匯出整理後資料成 CSV
+                                output = Output(df=df_after, TargetFileName=TargetFileName)
+                                output.output_data_to_csv()
+                                logger.info(f"匯出整理後資料成 CSV 完成")
+                            except Exception as e:
+                                logger.exception("ETL 遇到例外，匯出整理後資料成 CSV 中斷：")
                         except Exception as e:
-                            logger.exception("ETL 遇到例外，匯出整理後資料成 CSV 中斷：")
+                            logger.exception("ETL 遇到例外，敘述性統計 中斷：")
                     except Exception as e:
-                        logger.exception("ETL 遇到例外，敘述性統計 中斷：")
+                        logger.exception("ETL 遇到例外，清洗與異常處理 中斷：")
                 except Exception as e:
-                    logger.exception("ETL 遇到例外，清洗與異常處理 中斷：")
-            except Exception as e:
-                logger.exception("ETL 遇到例外，資料預處理 中斷：")
+                    logger.exception("ETL 遇到例外，資料預處理 中斷：")
         except Exception as e:
             logger.exception("ETL 遇到例外，自動下載工廠數據 中斷：")
     except Exception as e:

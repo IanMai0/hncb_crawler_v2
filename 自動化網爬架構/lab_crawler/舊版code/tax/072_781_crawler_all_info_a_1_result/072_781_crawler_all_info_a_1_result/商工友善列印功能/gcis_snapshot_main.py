@@ -184,3 +184,4 @@ if __name__ == "__main__":
     df = pd.DataFrame(results, columns=['company_id', 'status', 'speedtime'])
     print("\n[自動化查詢結果]")
     print(df)
+
