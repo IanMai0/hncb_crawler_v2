@@ -79,6 +79,11 @@
 ### 未來優化建議
 1.  **MD5 效能**: 目前 MD5 計算在 SQL 端執行，若 DB 負載過重，可移至 Python 端 `crawler_etl_v3` 計算 Hash 後再入庫。
 2.  **數據異常狀況處理：**
+
+### 資料取得流程
+<img width="1646" height="973" alt="image" src="https://github.com/user-attachments/assets/e8c57747-6cc7-4c15-8ddd-67fc0980a188" />
+
+  
 ---
 ## 2. 國貿局模組 (Trade Bureau)
 ### 主要目錄
@@ -114,6 +119,13 @@
 ### 未來優化建議
 1.  **新增 DB Loader**: 參考稅籍模組，建立 `db_loader_trade.py`，將 `BucketCsvExporter` 替換為資料庫寫入器。
 2.  **參數化配置**: 目前輸入/輸出路徑寫死在 `main`，應改用 `argparse` 傳入。
+
+### 資料取得流程
+<img width="1650" height="976" alt="image" src="https://github.com/user-attachments/assets/86e82ae8-0ac1-4d72-9380-50caaa5f3b83" />
+<img width="1632" height="568" alt="image" src="https://github.com/user-attachments/assets/5beead85-696c-4bcd-b1a2-370e62834728" />
+<img width="904" height="881" alt="image" src="https://github.com/user-attachments/assets/070bea62-e479-46f0-81b6-8fcd04ebd236" />
+<img width="901" height="884" alt="image" src="https://github.com/user-attachments/assets/0bd9c066-a94e-4434-8f2f-a054db573833" />
+
 ---
 ## 3. 工廠模組 (Factory)
 ### 主要目錄
@@ -149,6 +161,11 @@
 1.  **重寫開發調度層**: 廢棄 `lab_flow_control.py`，改用類似 `run_daily_job` 的標準架構。
 2.  **實作 DB 入庫 資料層**: 補完 `output_data_to_DB`，對接 `crawlerdb`。
 3.  **移除絕對路徑**: 將路徑改為相對路徑或配置檔讀取。
+
+### 資料取得流程
+<img width="1285" height="815" alt="image" src="https://github.com/user-attachments/assets/1d63d353-35bb-421d-a5d4-5294e9922ef7" />
+
+
 ---
 ## 4. GCIS 商工商業模組 (GCIS Business)
 ### 主要目錄
@@ -181,6 +198,13 @@
 ### 未來優化建議
 1.  **廢除 CSV Upsert**: 改用 `tmp_table` 批量寫入 + SQL Merge 模式。
 2.  **拆分模組**: 將 `SwitchIP` 獨立為 `lib.aws`，`GcisClient` 獨立為 `lib.network`。
+
+### 資料取得流程
+<img width="1657" height="946" alt="image" src="https://github.com/user-attachments/assets/435c1914-a5c1-49ff-af68-e7d09083bebb" />
+<img width="1655" height="974" alt="image" src="https://github.com/user-attachments/assets/0a28cd43-226c-4aff-8823-47080a328df3" />
+<img width="804" height="387" alt="image" src="https://github.com/user-attachments/assets/6f6e95ef-faaf-41ee-a0dd-cb607a007ac1" />
+
+
 ---
 ## 5. GCIS 商工公司模組 (GCIS Company)
 ### 主要目錄
@@ -211,6 +235,12 @@
 2.  **新型態架構開發**：調度層 > 轉換層 > 資料層。
 3.  **相關耦合性議題處理**：
 4.  **異常處理標準化**: 將「疑似商號」、「無資料」等狀態碼標準化，並記錄到 DB 的狀態欄位，而非混在資料欄位中。
+  
+### 資料取得流程
+<img width="1657" height="946" alt="image" src="https://github.com/user-attachments/assets/08fd11cc-99fe-401e-844b-d5d5bf73414b" />
+<img width="1567" height="981" alt="image" src="https://github.com/user-attachments/assets/25675b13-6c54-429d-9186-474fd7a1a32f" />
+<img width="1031" height="562" alt="image" src="https://github.com/user-attachments/assets/f0f3a1e1-367f-4651-ad26-56dfc4df76c1" />
+
 ---
 ## 🏗️ 爬蟲框架與系統架構
 採用「前後端解耦」與「模組化 Client」設計，確保核心擷取邏輯與業務流控制分離。
