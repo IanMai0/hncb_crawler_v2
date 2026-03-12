@@ -184,26 +184,117 @@ def table_exists(conn, table_name: str, schema_name: Optional[str] = None) -> bo
 # 小工具
 # =========================
 def _tw_roc_to_iso(s: Any) -> Optional[str]:
-    """民國 yyyMMdd -> 西元 yyyy-MM-dd；空字串或格式不對回傳 None"""
+    """日期轉西元 yyyy-MM-dd（兼容民國/西元常見格式）；無法解析回傳 None。"""
     if s is None:
         return None
 
-    s = str(s).strip().replace("　", "")
-    if not s:
+    raw = str(s).strip().replace("　", "")
+    if not raw:
         return None
 
-    if len(s) >= 7 and s[:3].isdigit():
-        y = int(s[:3]) + 1911
-        mm = s[3:5]
-        dd = s[5:7]
-        return f"{y:04d}-{mm}-{dd}"
+    raw = raw.replace("年", "/").replace("月", "/").replace("日", "")
+
+    # 先處理帶分隔符號（/, -, .）的常見格式，例如 112/03/05 或 2026-03-05
+    for sep in ("/", "-", "."):
+        if sep in raw:
+            parts = [x.strip() for x in raw.split(sep)]
+            if len(parts) >= 3 and all(parts[i].isdigit() for i in range(3)):
+                y = int(parts[0])
+                mm = int(parts[1])
+                dd = int(parts[2])
+                if not (1 <= mm <= 12 and 1 <= dd <= 31):
+                    return None
+
+                # yyy(民國) -> 西元；yyyy(西元) -> 直接使用
+                if 1 <= y <= 299:
+                    return f"{y + 1911:04d}-{mm:02d}-{dd:02d}"
+                if 1900 <= y <= 2100:
+                    return f"{y:04d}-{mm:02d}-{dd:02d}"
+            return None
+
+    # 再處理純數字格式：yyyMMdd / yyyMdd / yyyyMMdd（長度 >= 7）
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if len(digits) < 7:
+        return None
+
+    # 優先嘗試西元 yyyyMMdd
+    if len(digits) >= 8:
+        y4 = int(digits[:4])
+        mm4 = int(digits[4:6])
+        dd4 = int(digits[6:8])
+        if 1900 <= y4 <= 2100 and 1 <= mm4 <= 12 and 1 <= dd4 <= 31:
+            return f"{y4:04d}-{mm4:02d}-{dd4:02d}"
+
+    roc_y = int(digits[:3])
+    tail = digits[3:]
+
+    # 優先抓 MMdd；若不合理再退而求其次抓 Mdd
+    mm = dd = None
+    if len(tail) >= 4:
+        m1, d1 = int(tail[:2]), int(tail[2:4])
+        if 1 <= m1 <= 12 and 1 <= d1 <= 31:
+            mm, dd = m1, d1
+    if mm is None and len(tail) >= 3:
+        m2, d2 = int(tail[:1]), int(tail[1:3])
+        if 1 <= m2 <= 12 and 1 <= d2 <= 31:
+            mm, dd = m2, d2
+
+    if roc_y > 0 and mm is not None and dd is not None:
+        return f"{roc_y + 1911:04d}-{mm:02d}-{dd:02d}"
 
     return None
 
+def _date_or_raw(v: Any) -> Optional[str]:
+    """日期欄位儲存策略：可解析則回 yyyy-MM-dd，否則保留原字串（避免整欄變 null）。"""
+    norm = _normalize_cell(v)
+    if not norm:
+        return None
+    parsed = _tw_roc_to_iso(norm)
+    return parsed if parsed is not None else norm
 
-def _to_int_or_none(v: Any) -> Optional[int]:
-    v = str(v or "").strip()
-    return int(v) if v.isdigit() else None
+
+def _self_test_tw_roc_to_iso() -> None:
+    """小型自測：驗證日期轉換兼容格式。"""
+    cases = {
+        "112/03/05": "2023-03-05",
+        "1120305": "2023-03-05",
+        "112-3-5": "2023-03-05",
+        "112.03.05": "2023-03-05",
+        "": None,
+        None: None,
+        "abc": None,
+        "112/00/05": None,
+    }
+    for raw, expected in cases.items():
+        got = _tw_roc_to_iso(raw)
+        assert got == expected, f"_tw_roc_to_iso({raw!r}) => {got!r}, expected {expected!r}"
+
+    assert _corp_no_or_none("00123456") == "00123456"
+    assert _corp_no_or_none("A12345") == "A12345"
+    assert _corp_no_or_none("  ") is None
+    assert _normalize_cell("  台 灣  世曦  ") == "台 灣  世曦"
+
+
+def _normalize_cell(v: Any) -> str:
+    """保留內文空白，只做前後 trim 與全形空白正規化。"""
+    return str(v or "").replace("　", " ").strip()
+
+
+def _corp_no_or_none(v: Any) -> Optional[str]:
+    """統編/廠商代碼保留原字串（含前導0、英數），空值回傳 None。"""
+    s = _normalize_cell(v)
+    return s or None
+
+def _is_header_row(row: List[str]) -> bool:
+    """判斷 CSV 內嵌表頭列（避免被當成資料 insert）。"""
+    if not row:
+        return False
+    first = _normalize_cell(row[0])
+    return ("廠商" in first) and (("代碼" in first) or ("統編" in first))
+
+# def _to_int_or_none(v: Any) -> Optional[int]:
+#     v = str(v or "").strip()
+#     return int(v) if v.isdigit() else None
 
 
 def count_csv_rows(path: str) -> Tuple[int, int]:
@@ -340,10 +431,14 @@ def pcc_excellent_to_db(conn, csv_path: str) -> int:
             if len(r) < 14:
                 r = r + [""] * (14 - len(r))
 
-            r = [(r[i] or "").replace(" ", "").replace("\u3000", "") for i in range(len(r))]
+            r = [_normalize_cell(r[i]) for i in range(len(r))]
+
+            if _is_header_row(r):
+                logger.warning(f"Skip header-like row in excellent csv -> {r}")
+                continue
 
             # 廠商相關
-            corporation_number = _to_int_or_none(r[0])
+            corporation_number = _corp_no_or_none(r[0])
 
             if corporation_number is None:  # 如果統編不存在 → 直接跳過
                 logger.warning(f"Skip row: corporation_number missing -> {r}")
@@ -361,8 +456,8 @@ def pcc_excellent_to_db(conn, csv_path: str) -> int:
             # 標案/依據
             judgment_no = r[9] or None
             # 時間
-            effective_date = _tw_roc_to_iso(r[10]) or None
-            expire_date = _tw_roc_to_iso(r[11]) or None
+            effective_date = _date_or_raw(r[10]) or None
+            expire_date = _date_or_raw(r[11]) or None
             # 其他
             remark = r[13] or None
 
@@ -451,13 +546,16 @@ def pcc_expire_to_db(conn, csv_path: str) -> int:
                 continue
 
             # 防呆：欄位不足時補空字串，避免 index error
-            if len(r) < 14:
-                r = r + [""] * (14 - len(r))
+            if len(r) < 25:
+                r = r + [""] * (25 - len(r))
 
-            r = [(r[i] or "").replace(" ", "").replace("\u3000", "") for i in range(len(r))]
+            r = [_normalize_cell(r[i]) for i in range(len(r))]
+            if _is_header_row(r):
+                logger.warning(f"Skip header-like row in expire csv -> {r}")
+                continue
 
             # 廠商相關
-            corporation_number = _to_int_or_none(r[0])
+            corporation_number = _corp_no_or_none(r[0])
 
             if corporation_number is None:  # 如果統編不存在 → 直接跳過
                 logger.warning(f"Skip row: corporation_number missing -> {r}")
@@ -485,10 +583,10 @@ def pcc_expire_to_db(conn, csv_path: str) -> int:
             judgment_range_date = r[22] or None
             judgment_info = r[23] or None
             # 時間
-            original_announce_date = _tw_roc_to_iso(r[14]) or None
-            announce_date = _tw_roc_to_iso(r[15]) or None
-            effective_date = _tw_roc_to_iso(r[16]) or None
-            expire_date = _tw_roc_to_iso(r[18]) or None
+            original_announce_date = _date_or_raw(r[14]) or None
+            announce_date = _date_or_raw(r[15]) or None
+            effective_date = _date_or_raw(r[16]) or None
+            expire_date = _date_or_raw(r[18]) or None
             # 其他
             remark = r[24] or None
 
@@ -709,30 +807,30 @@ def sync_pcc_expire_to_main(conn) -> int:
             t.Corporation_number IS NULL OR
             NOT (          
               a.Corporation_number           <=> t.Corporation_number AND
-              a.Case_no                      <=> t.Case_no AND
-              a.Corporation_name             <=> t.Corporation_name AND
-              a.Corporation_address          <=> t.Corporation_address AND
-              a.Corporation_country          <=> t.Corporation_country AND
-              a.Announce_agency_no           <=> t.Announce_agency_no AND
-              a.Announce_agency_name         <=> t.Announce_agency_name AND
-              a.Announce_agency_address      <=> t.Announce_agency_address AND
-              a.Contact_person               <=> t.Contact_person AND
-              a.Contact_no                   <=> t.Contact_no AND
-              a.Corporation_principal        <=> t.Corporation_principal AND
-              a.Corporation_principal_id     <=> t.Corporation_principal_id AND
-              a.Case_name                    <=> t.Case_name AND
-              a.Judgment_gpa101_clause       <=> t.Judgment_gpa101_clause AND
-              a.Original_announce_date       <=> t.Original_announce_date AND
-              a.Announce_date                <=> t.Announce_date AND
-              a.Effective_date               <=> t.Effective_date AND
-              a.Judgment_effective_duration  <=> t.Judgment_effective_duration AND
-              a.Expire_date                  <=> t.Expire_date AND
-              a.Case_appeal_result           <=> t.Case_appeal_result AND
-              a.Judgment_doc_no              <=> t.Judgment_doc_no AND
-              a.Judgment_no                  <=> t.Judgment_no AND
-              a.Judgment_range_date          <=> t.Judgment_range_date AND
-              a.Judgment_info                <=> t.Judgment_info AND
-              a.Remark                       <=> t.Remark
+              a.Case_no COLLATE utf8mb4_unicode_ci                      <=> t.Case_no COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_name COLLATE utf8mb4_unicode_ci             <=> t.Corporation_name COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_address COLLATE utf8mb4_unicode_ci          <=> t.Corporation_address COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_country COLLATE utf8mb4_unicode_ci          <=> t.Corporation_country COLLATE utf8mb4_unicode_ci AND
+              a.Announce_agency_no COLLATE utf8mb4_unicode_ci           <=> t.Announce_agency_no COLLATE utf8mb4_unicode_ci AND
+              a.Announce_agency_name COLLATE utf8mb4_unicode_ci         <=> t.Announce_agency_name COLLATE utf8mb4_unicode_ci AND
+              a.Announce_agency_address COLLATE utf8mb4_unicode_ci      <=> t.Announce_agency_address COLLATE utf8mb4_unicode_ci AND
+              a.Contact_person COLLATE utf8mb4_unicode_ci               <=> t.Contact_person COLLATE utf8mb4_unicode_ci AND
+              a.Contact_no COLLATE utf8mb4_unicode_ci                   <=> t.Contact_no COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_principal COLLATE utf8mb4_unicode_ci        <=> t.Corporation_principal COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_principal_id COLLATE utf8mb4_unicode_ci     <=> t.Corporation_principal_id COLLATE utf8mb4_unicode_ci AND
+              a.Case_name COLLATE utf8mb4_unicode_ci                    <=> t.Case_name COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_gpa101_clause COLLATE utf8mb4_unicode_ci       <=> t.Judgment_gpa101_clause COLLATE utf8mb4_unicode_ci AND
+              a.Original_announce_date COLLATE utf8mb4_unicode_ci       <=> t.Original_announce_date COLLATE utf8mb4_unicode_ci AND
+              a.Announce_date COLLATE utf8mb4_unicode_ci                <=> t.Announce_date COLLATE utf8mb4_unicode_ci AND
+              a.Effective_date COLLATE utf8mb4_unicode_ci               <=> t.Effective_date COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_effective_duration COLLATE utf8mb4_unicode_ci  <=> t.Judgment_effective_duration COLLATE utf8mb4_unicode_ci AND
+              a.Expire_date COLLATE utf8mb4_unicode_ci                  <=> t.Expire_date COLLATE utf8mb4_unicode_ci AND
+              a.Case_appeal_result COLLATE utf8mb4_unicode_ci           <=> t.Case_appeal_result COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_doc_no COLLATE utf8mb4_unicode_ci              <=> t.Judgment_doc_no COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_no COLLATE utf8mb4_unicode_ci                  <=> t.Judgment_no COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_range_date COLLATE utf8mb4_unicode_ci          <=> t.Judgment_range_date COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_info COLLATE utf8mb4_unicode_ci                <=> t.Judgment_info COLLATE utf8mb4_unicode_ci AND
+              a.Remark COLLATE utf8mb4_unicode_ci                       <=> t.Remark COLLATE utf8mb4_unicode_ci
             )
           );
         """
@@ -808,30 +906,30 @@ def sync_pcc_expire_to_main(conn) -> int:
             t.Corporation_number IS NULL OR
             NOT (
               a.Corporation_number           <=> t.Corporation_number AND
-              a.Case_no                      <=> t.Case_no AND
-              a.Corporation_name             <=> t.Corporation_name AND
-              a.Corporation_address          <=> t.Corporation_address AND
-              a.Corporation_country          <=> t.Corporation_country AND
-              a.Announce_agency_no           <=> t.Announce_agency_no AND
-              a.Announce_agency_name         <=> t.Announce_agency_name AND
-              a.Announce_agency_address      <=> t.Announce_agency_address AND
-              a.Contact_person               <=> t.Contact_person AND
-              a.Contact_no                   <=> t.Contact_no AND
-              a.Corporation_principal        <=> t.Corporation_principal AND
-              a.Corporation_principal_id     <=> t.Corporation_principal_id AND
-              a.Case_name                    <=> t.Case_name AND
-              a.Judgment_gpa101_clause       <=> t.Judgment_gpa101_clause AND
-              a.Original_announce_date       <=> t.Original_announce_date AND
-              a.Announce_date                <=> t.Announce_date AND
-              a.Effective_date               <=> t.Effective_date AND
-              a.Judgment_effective_duration  <=> t.Judgment_effective_duration AND
-              a.Expire_date                  <=> t.Expire_date AND
-              a.Case_appeal_result           <=> t.Case_appeal_result AND
-              a.Judgment_doc_no              <=> t.Judgment_doc_no AND
-              a.Judgment_no                  <=> t.Judgment_no AND
-              a.Judgment_range_date          <=> t.Judgment_range_date AND
-              a.Judgment_info                <=> t.Judgment_info AND
-              a.Remark                       <=> t.Remark
+              a.Case_no COLLATE utf8mb4_unicode_ci                      <=> t.Case_no COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_name COLLATE utf8mb4_unicode_ci             <=> t.Corporation_name COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_address COLLATE utf8mb4_unicode_ci          <=> t.Corporation_address COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_country COLLATE utf8mb4_unicode_ci          <=> t.Corporation_country COLLATE utf8mb4_unicode_ci AND
+              a.Announce_agency_no COLLATE utf8mb4_unicode_ci           <=> t.Announce_agency_no COLLATE utf8mb4_unicode_ci AND
+              a.Announce_agency_name COLLATE utf8mb4_unicode_ci         <=> t.Announce_agency_name COLLATE utf8mb4_unicode_ci AND
+              a.Announce_agency_address COLLATE utf8mb4_unicode_ci      <=> t.Announce_agency_address COLLATE utf8mb4_unicode_ci AND
+              a.Contact_person COLLATE utf8mb4_unicode_ci               <=> t.Contact_person COLLATE utf8mb4_unicode_ci AND
+              a.Contact_no COLLATE utf8mb4_unicode_ci                   <=> t.Contact_no COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_principal COLLATE utf8mb4_unicode_ci        <=> t.Corporation_principal COLLATE utf8mb4_unicode_ci AND
+              a.Corporation_principal_id COLLATE utf8mb4_unicode_ci     <=> t.Corporation_principal_id COLLATE utf8mb4_unicode_ci AND
+              a.Case_name COLLATE utf8mb4_unicode_ci                    <=> t.Case_name COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_gpa101_clause COLLATE utf8mb4_unicode_ci       <=> t.Judgment_gpa101_clause COLLATE utf8mb4_unicode_ci AND
+              a.Original_announce_date COLLATE utf8mb4_unicode_ci       <=> t.Original_announce_date COLLATE utf8mb4_unicode_ci AND
+              a.Announce_date COLLATE utf8mb4_unicode_ci                <=> t.Announce_date COLLATE utf8mb4_unicode_ci AND
+              a.Effective_date COLLATE utf8mb4_unicode_ci               <=> t.Effective_date COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_effective_duration COLLATE utf8mb4_unicode_ci  <=> t.Judgment_effective_duration COLLATE utf8mb4_unicode_ci AND
+              a.Expire_date COLLATE utf8mb4_unicode_ci                  <=> t.Expire_date COLLATE utf8mb4_unicode_ci AND
+              a.Case_appeal_result COLLATE utf8mb4_unicode_ci           <=> t.Case_appeal_result COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_doc_no COLLATE utf8mb4_unicode_ci              <=> t.Judgment_doc_no COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_no COLLATE utf8mb4_unicode_ci                  <=> t.Judgment_no COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_range_date COLLATE utf8mb4_unicode_ci          <=> t.Judgment_range_date COLLATE utf8mb4_unicode_ci AND
+              a.Judgment_info COLLATE utf8mb4_unicode_ci                <=> t.Judgment_info COLLATE utf8mb4_unicode_ci AND
+              a.Remark COLLATE utf8mb4_unicode_ci                       <=> t.Remark COLLATE utf8mb4_unicode_ci
             )
           );
         """
@@ -889,5 +987,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-
+    if "--self-test-date" in os.sys.argv:
+        _self_test_tw_roc_to_iso()
+        print("date parser self-test passed")
+    else:
+        main()
