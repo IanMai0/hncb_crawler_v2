@@ -1,9 +1,9 @@
 import pandas as pd
 
 # ========= 檔案路徑 =========
-FACTORY_CSV = "處理後_20251224_104037_11411.csv"
-TARGET_UID_CSV = "169911筆目標統編_1000萬以上.csv"
-OUTPUT_CSV = "result_1000wUp.csv"
+FACTORY_CSV = "output/處理後_20260323_092223_11501.csv"
+TARGET_UID_CSV = "137313筆目標統編_400w-1000w.csv"
+OUTPUT_CSV = "result_400w-1000w_260302.csv"
 
 # ========= 讀取資料 =========
 factory_df = pd.read_csv(FACTORY_CSV, dtype=str)
