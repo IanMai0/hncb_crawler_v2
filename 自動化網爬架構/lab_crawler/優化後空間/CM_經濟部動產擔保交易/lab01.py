@@ -5,7 +5,7 @@ import io
 from urllib3.exceptions import InsecureRequestWarning
 
 # 1. 抑制 SSL 安全警告
-requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)  # 因應目標網站跟不上最新 SSL
 
 
 class PropertyCrawler:
@@ -153,12 +153,12 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60)
 
-    # # 執行第二個頁面的查詢
-    # df2 = crawler.query_page_2()
-    # if df2 is not None:
-    #     print("\n--- [Page 2 詳細內容 (由 DIV 提取)] ---")
-    #     print(df2.to_string(index=False))
-    # else:
-    #     print("Page 2 數據提取失敗。")
+    # 執行第二個頁面的查詢
+    df2 = crawler.query_page_2()
+    if df2 is not None:
+        print("\n--- [Page 2 詳細內容 (由 DIV 提取)] ---")
+        print(df2.to_string(index=False))
+    else:
+        print("Page 2 數據提取失敗。")
 
 
